@@ -1,0 +1,212 @@
+//! JPL SPK files: the DAF container and its Chebyshev segments (types 2 and 3), as JPL's DE
+//! ephemerides are distributed (de440.bsp and the like).
+
+use std::fmt;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+use std::sync::Mutex;
+
+/// A segment's summary.
+#[derive(Clone, Copy, Debug)]
+struct Segment {
+    /// TDB seconds past J2000.
+    start: f64,
+    end: f64,
+    target: i32,
+    center: i32,
+    kind: i32,
+    /// Its first and last 8-byte words, 1-based.
+    begin: usize,
+    finish: usize,
+    /// From its trailer: the first record's start, each record's span and size, the count.
+    init: f64,
+    interval: f64,
+    record_size: usize,
+    records: usize,
+}
+
+/// An SPK file, read on demand.
+#[derive(Debug)]
+pub struct Spk {
+    file: Mutex<File>,
+    segments: Vec<Segment>,
+    /// The last record read, by segment index and record number.
+    cache: Mutex<Option<(usize, usize, Vec<f64>)>>,
+}
+
+/// An SPK file that couldn't be read, or a request it can't answer.
+#[derive(Debug)]
+pub enum Error {
+    Io(std::io::Error),
+    Format(String),
+    NoSegment { target: i32, center: i32, jd: f64 },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Io(e) => write!(f, "spk: {e}"),
+            Error::Format(why) => write!(f, "spk: {why}"),
+            Error::NoSegment { target, center, jd } => {
+                write!(
+                    f,
+                    "spk: no segment for {target} relative to {center} at JD {jd}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Error {
+        Error::Io(e)
+    }
+}
+
+const RECORD: usize = 1024;
+
+fn f64_at(b: &[u8], i: usize) -> f64 {
+    f64::from_le_bytes(b[i..i + 8].try_into().expect("eight bytes"))
+}
+
+fn i32_at(b: &[u8], i: usize) -> i32 {
+    i32::from_le_bytes(b[i..i + 4].try_into().expect("four bytes"))
+}
+
+impl Spk {
+    pub fn open(path: impl AsRef<Path>) -> Result<Spk, Error> {
+        let mut file = File::open(path)?;
+        let mut rec = vec![0u8; RECORD];
+        file.read_exact(&mut rec)?;
+        if &rec[..8] != b"DAF/SPK " {
+            return Err(Error::Format("not an SPK file".into()));
+        }
+        if &rec[88..96] != b"LTL-IEEE" {
+            return Err(Error::Format("not little-endian IEEE".into()));
+        }
+        let (nd, ni) = (i32_at(&rec, 8) as usize, i32_at(&rec, 12) as usize);
+        if (nd, ni) != (2, 6) {
+            return Err(Error::Format(format!("ND {nd}, NI {ni}; want 2 and 6")));
+        }
+        let mut next = i32_at(&rec, 76) as usize;
+        let summary_doubles = nd + ni.div_ceil(2);
+        let mut segments = Vec::new();
+        while next != 0 {
+            file.seek(SeekFrom::Start(((next - 1) * RECORD) as u64))?;
+            file.read_exact(&mut rec)?;
+            let count = f64_at(&rec, 16) as usize;
+            for i in 0..count {
+                let o = 24 + i * summary_doubles * 8;
+                let ints = |k: usize| i32_at(&rec, o + 16 + 4 * k);
+                segments.push(Segment {
+                    start: f64_at(&rec, o),
+                    end: f64_at(&rec, o + 8),
+                    target: ints(0),
+                    center: ints(1),
+                    kind: ints(3),
+                    begin: ints(4) as usize,
+                    finish: ints(5) as usize,
+                    init: 0.0,
+                    interval: 0.0,
+                    record_size: 0,
+                    records: 0,
+                });
+            }
+            next = f64_at(&rec, 0) as usize;
+        }
+        let spk = Spk {
+            file: Mutex::new(file),
+            segments,
+            cache: Mutex::new(None),
+        };
+        let mut segments = spk.segments.clone();
+        for s in &mut segments {
+            if !matches!(s.kind, 2 | 3) {
+                continue;
+            }
+            let t = spk.words(s.finish - 3, 4)?;
+            (s.init, s.interval, s.record_size, s.records) =
+                (t[0], t[1], t[2] as usize, t[3] as usize);
+        }
+        Ok(Spk { segments, ..spk })
+    }
+
+    /// `n` words from word `at` (1-based).
+    fn words(&self, at: usize, n: usize) -> Result<Vec<f64>, Error> {
+        let mut b = vec![0u8; n * 8];
+        let mut file = self.file.lock().expect("not poisoned");
+        file.seek(SeekFrom::Start(((at - 1) * 8) as u64))?;
+        file.read_exact(&mut b)?;
+        Ok((0..n).map(|i| f64_at(&b, i * 8)).collect())
+    }
+
+    /// The position (km) and velocity (km/s) of `target` relative to `center` at TDB Julian
+    /// date `jd`, in the file's frame (ICRF for the DE ephemerides).
+    pub fn state(&self, target: i32, center: i32, jd: f64) -> Result<([f64; 3], [f64; 3]), Error> {
+        let et = (jd - 2451545.0) * 86400.0;
+        let (i, s) = self
+            .segments
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.target == target && s.center == center && s.start <= et && et <= s.end)
+            .ok_or(Error::NoSegment { target, center, jd })?;
+        if !matches!(s.kind, 2 | 3) {
+            return Err(Error::Format(format!(
+                "segment type {} isn't Chebyshev",
+                s.kind
+            )));
+        }
+        let r = (((et - s.init) / s.interval).floor() as usize).min(s.records - 1);
+        let mut cache = self.cache.lock().expect("not poisoned");
+        let hit = matches!(&*cache, Some((ci, cr, _)) if *ci == i && *cr == r);
+        if !hit {
+            let words = self.words(s.begin + r * s.record_size, s.record_size)?;
+            *cache = Some((i, r, words));
+        }
+        let rec = &cache.as_ref().expect("filled").2;
+        let (mid, radius) = (rec[0], rec[1]);
+        let components = if s.kind == 2 { 3 } else { 6 };
+        let n = (s.record_size - 2) / components;
+        let x = (et - mid) / radius;
+        // Chebyshev polynomials and their derivatives.
+        let mut t = vec![0.0; n];
+        let mut dt = vec![0.0; n];
+        t[0] = 1.0;
+        if n > 1 {
+            t[1] = x;
+            dt[1] = 1.0;
+        }
+        for k in 2..n {
+            t[k] = 2.0 * x * t[k - 1] - t[k - 2];
+            dt[k] = 2.0 * t[k - 1] + 2.0 * x * dt[k - 1] - dt[k - 2];
+        }
+        let mut pos = [0.0; 3];
+        let mut vel = [0.0; 3];
+        for c in 0..3 {
+            let coef = &rec[2 + c * n..2 + (c + 1) * n];
+            pos[c] = coef.iter().zip(&t).map(|(a, b)| a * b).sum();
+            vel[c] = if s.kind == 3 {
+                let vcoef = &rec[2 + (3 + c) * n..2 + (4 + c) * n];
+                vcoef.iter().zip(&t).map(|(a, b)| a * b).sum()
+            } else {
+                coef.iter().zip(&dt).map(|(a, b)| a * b).sum::<f64>() / radius
+            };
+        }
+        Ok((pos, vel))
+    }
+
+    /// The span the file covers for `target` relative to `center`, as TDB Julian dates.
+    pub fn span(&self, target: i32, center: i32) -> Option<(f64, f64)> {
+        let s: Vec<&Segment> = self
+            .segments
+            .iter()
+            .filter(|s| s.target == target && s.center == center)
+            .collect();
+        let start = s.iter().map(|s| s.start).fold(f64::INFINITY, f64::min);
+        let end = s.iter().map(|s| s.end).fold(f64::NEG_INFINITY, f64::max);
+        (!s.is_empty()).then(|| (2451545.0 + start / 86400.0, 2451545.0 + end / 86400.0))
+    }
+}
