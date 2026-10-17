@@ -2,9 +2,13 @@
 //! Swiss Ephemeris as we can make them. See `.ai/plans/12-ephemeris.md`.
 
 pub mod apparent;
+pub mod derived;
 pub mod elpmpp02;
+pub mod events;
+pub mod horizon;
 pub mod nutation;
 pub mod precession;
+pub mod sidereal;
 pub mod slice;
 pub mod source;
 pub mod spk;
