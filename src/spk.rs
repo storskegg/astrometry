@@ -184,31 +184,19 @@ impl Spk {
         let components = if s.kind == 2 { 3 } else { 6 };
         let n = (s.record_size - 2) / components;
         let x = (et - mid) / radius;
-        // Chebyshev polynomials and their derivatives.
-        let mut t = vec![0.0; n];
-        let mut dt = vec![0.0; n];
-        t[0] = 1.0;
-        if n > 1 {
-            t[1] = x;
-            dt[1] = 1.0;
-        }
-        for k in 2..n {
-            t[k] = 2.0 * x * t[k - 1] - t[k - 2];
-            dt[k] = 2.0 * t[k - 1] + 2.0 * x * dt[k - 1] - dt[k - 2];
-        }
-        let mut pos = [0.0; 3];
-        let mut vel = [0.0; 3];
-        for c in 0..3 {
-            let coef = &rec[2 + c * n..2 + (c + 1) * n];
-            pos[c] = coef.iter().zip(&t).map(|(a, b)| a * b).sum();
-            vel[c] = if s.kind == 3 {
-                let vcoef = &rec[2 + (3 + c) * n..2 + (4 + c) * n];
-                vcoef.iter().zip(&t).map(|(a, b)| a * b).sum()
-            } else {
-                coef.iter().zip(&dt).map(|(a, b)| a * b).sum::<f64>() / radius
-            };
-        }
-        Ok((pos, vel))
+        Ok(crate::cheb::with_polynomials(x, n, |t, dt| {
+            let (mut pos, mut vel) = ([0.0; 3], [0.0; 3]);
+            for c in 0..3 {
+                let coef = &rec[2 + c * n..2 + (c + 1) * n];
+                pos[c] = crate::cheb::sum(coef, t);
+                vel[c] = if s.kind == 3 {
+                    crate::cheb::sum(&rec[2 + (3 + c) * n..2 + (4 + c) * n], t)
+                } else {
+                    crate::cheb::sum(coef, dt) / radius
+                };
+            }
+            (pos, vel)
+        }))
     }
 
     /// The Chebyshev records of `target` relative to `center` that cover TDB Julian dates

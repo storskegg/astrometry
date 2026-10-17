@@ -2,6 +2,7 @@
 //! Swiss Ephemeris as we can make them. See `.ai/plans/12-ephemeris.md`.
 
 pub mod apparent;
+mod cheb;
 pub mod derived;
 pub mod elpmpp02;
 pub mod events;

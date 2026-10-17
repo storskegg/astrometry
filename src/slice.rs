@@ -52,23 +52,15 @@ impl Segment {
         let x = (et - mid) / radius;
         let n = self.n;
         let rec = &self.coef[r * 3 * n..(r + 1) * 3 * n];
-        let (mut t, mut dt) = (vec![0.0; n], vec![0.0; n]);
-        t[0] = 1.0;
-        if n > 1 {
-            t[1] = x;
-            dt[1] = 1.0;
-        }
-        for k in 2..n {
-            t[k] = 2.0 * x * t[k - 1] - t[k - 2];
-            dt[k] = 2.0 * t[k - 1] + 2.0 * x * dt[k - 1] - dt[k - 2];
-        }
-        let (mut pos, mut vel) = ([0.0; 3], [0.0; 3]);
-        for c in 0..3 {
-            let coef = &rec[c * n..(c + 1) * n];
-            pos[c] = coef.iter().zip(&t).map(|(a, b)| a * b).sum();
-            vel[c] = coef.iter().zip(&dt).map(|(a, b)| a * b).sum::<f64>() / radius;
-        }
-        Some((pos, vel))
+        Some(crate::cheb::with_polynomials(x, n, |t, dt| {
+            let (mut pos, mut vel) = ([0.0; 3], [0.0; 3]);
+            for c in 0..3 {
+                let coef = &rec[c * n..(c + 1) * n];
+                pos[c] = crate::cheb::sum(coef, t);
+                vel[c] = crate::cheb::sum(coef, dt) / radius;
+            }
+            (pos, vel)
+        }))
     }
 }
 
