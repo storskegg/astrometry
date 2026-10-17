@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use astrometry::apparent::apparent;
-use astrometry::source::{Body, Jpl};
+use astrometry::source::{Body, Builtin, Jpl, Source};
 
 /// DE440: from `ASTROMETRY_DE440`, which must then exist (CI sets it), or else from
 /// `target/jpl/de440.bsp` if it's there.
@@ -62,7 +62,7 @@ struct Worst {
 
 /// The worst differences by body, before Horizons' switch to UTC (1962) and after.
 fn compare(
-    src: &Jpl,
+    src: &dyn Source,
     file: &str,
     select: impl Fn(&[String]) -> Option<(Body, f64, f64, f64)>,
 ) -> BTreeMap<(String, bool), Worst> {
@@ -89,10 +89,8 @@ fn compare(
     worst
 }
 
-#[test]
-fn against_horizons() {
-    let Some(src) = de440() else { return };
-    let worst = compare(&src, "horizons/positions.tsv", |r| {
+fn against_horizons(src: &dyn Source) {
+    let worst = compare(src, "horizons/positions.tsv", |r| {
         let b = body(&r[0])?;
         Some((
             b,
@@ -116,9 +114,7 @@ fn against_horizons() {
 
 /// Against Horizons with its ecliptic taken out: each body's difference less the Sun's at the
 /// same instant, which carries the IAU76/80 ecliptic's offset and drift.
-#[test]
-fn against_horizons_relative_to_the_sun() {
-    let Some(src) = de440() else { return };
+fn against_horizons_relative_to_the_sun(src: &dyn Source) {
     let h = rows("horizons/positions.tsv");
     let sun: BTreeMap<String, (f64, f64)> = h
         .iter()
@@ -133,8 +129,8 @@ fn against_horizons_relative_to_the_sun() {
         };
         let jd: f64 = r[1].parse().unwrap();
         let (lon, lat): (f64, f64) = (r[2].parse().unwrap(), r[3].parse().unwrap());
-        let got = apparent(&src, b, jd).unwrap();
-        let s = apparent(&src, Body::Sun, jd).unwrap();
+        let got = apparent(src, b, jd).unwrap();
+        let s = apparent(src, Body::Sun, jd).unwrap();
         let rel = (d(got.longitude, lon) - d(s.longitude, sun[&r[1]].0)) * lat.to_radians().cos();
         worst = worst.max(rel.abs());
     }
@@ -143,10 +139,8 @@ fn against_horizons_relative_to_the_sun() {
     assert!(worst < 0.03, "{worst:.4}″");
 }
 
-#[test]
-fn against_swiss_ephemeris() {
-    let Some(src) = de440() else { return };
-    let worst = compare(&src, "swisseph/positions.tsv", |r| {
+fn against_swiss_ephemeris(src: &dyn Source) {
+    let worst = compare(src, "swisseph/positions.tsv", |r| {
         if r[0] != "jpl" {
             return None;
         }
@@ -174,4 +168,44 @@ fn against_swiss_ephemeris() {
         lon < 0.005 && lat < 0.005,
         "longitude {lon:.4}″, latitude {lat:.4}″"
     );
+}
+
+// DE440 itself, from the file.
+
+#[test]
+fn de440_against_horizons() {
+    if let Some(src) = de440() {
+        against_horizons(&src);
+    }
+}
+
+#[test]
+fn de440_against_horizons_relative_to_the_sun() {
+    if let Some(src) = de440() {
+        against_horizons_relative_to_the_sun(&src);
+    }
+}
+
+#[test]
+fn de440_against_swiss_ephemeris() {
+    if let Some(src) = de440() {
+        against_swiss_ephemeris(&src);
+    }
+}
+
+// The built-in slice of DE440, which needs no file: these run everywhere.
+
+#[test]
+fn builtin_against_horizons() {
+    against_horizons(&Builtin);
+}
+
+#[test]
+fn builtin_against_horizons_relative_to_the_sun() {
+    against_horizons_relative_to_the_sun(&Builtin);
+}
+
+#[test]
+fn builtin_against_swiss_ephemeris() {
+    against_swiss_ephemeris(&Builtin);
 }

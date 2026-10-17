@@ -5,6 +5,7 @@ pub mod apparent;
 pub mod elpmpp02;
 pub mod nutation;
 pub mod precession;
+pub mod slice;
 pub mod source;
 pub mod spk;
 pub mod time;

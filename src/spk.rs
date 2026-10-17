@@ -26,6 +26,19 @@ struct Segment {
     records: usize,
 }
 
+/// A run of a type 2 segment's records: each record's coefficients, x then y then z, `n`
+/// each, the first record starting at `init` (TDB seconds past J2000), each `interval`
+/// seconds long.
+#[derive(Clone, Debug)]
+pub struct Records {
+    pub target: i32,
+    pub center: i32,
+    pub init: f64,
+    pub interval: f64,
+    pub n: usize,
+    pub records: Vec<Vec<f64>>,
+}
+
 /// An SPK file, read on demand.
 #[derive(Debug)]
 pub struct Spk {
@@ -196,6 +209,47 @@ impl Spk {
             };
         }
         Ok((pos, vel))
+    }
+
+    /// The Chebyshev records of `target` relative to `center` that cover TDB Julian dates
+    /// `from` to `to`, from one type 2 segment, for re-encoding.
+    pub fn records(&self, target: i32, center: i32, from: f64, to: f64) -> Result<Records, Error> {
+        let (et0, et1) = ((from - 2451545.0) * 86400.0, (to - 2451545.0) * 86400.0);
+        let s = self
+            .segments
+            .iter()
+            .find(|s| s.target == target && s.center == center && s.start <= et0 && et1 <= s.end)
+            .ok_or(Error::NoSegment {
+                target,
+                center,
+                jd: from,
+            })?;
+        if s.kind != 2 {
+            return Err(Error::Format(format!("segment type {}, want 2", s.kind)));
+        }
+        let first = ((et0 - s.init) / s.interval).floor() as usize;
+        let last = (((et1 - s.init) / s.interval).ceil() as usize).min(s.records);
+        let n = (s.record_size - 2) / 3;
+        let mut records = Vec::with_capacity(last - first);
+        for r in first..last {
+            let words = self.words(s.begin + r * s.record_size, s.record_size)?;
+            let (mid, radius) = (words[0], words[1]);
+            let start = s.init + r as f64 * s.interval;
+            if (mid - (start + s.interval / 2.0)).abs() > 1e-6
+                || (radius - s.interval / 2.0).abs() > 1e-6
+            {
+                return Err(Error::Format(format!("record {r} isn't evenly spaced")));
+            }
+            records.push(words[2..].to_vec());
+        }
+        Ok(Records {
+            target,
+            center,
+            init: s.init + first as f64 * s.interval,
+            interval: s.interval,
+            n,
+            records,
+        })
     }
 
     /// The span the file covers for `target` relative to `center`, as TDB Julian dates.

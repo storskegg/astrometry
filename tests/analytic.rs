@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use astrometry::apparent::apparent;
-use astrometry::source::{Analytic, Body, Jpl, Source};
+use astrometry::source::{Analytic, Body, Builtin, Jpl, Source};
 use astrometry::vector::{norm, sub};
 
 fn de440() -> Option<Jpl> {
@@ -103,4 +103,24 @@ fn raw_vectors_against_de440() {
             }
         );
     }
+}
+
+/// The built-in slice against DE440 itself: the rounding of its coefficients only.
+#[test]
+fn builtin_against_de440() {
+    let Some(jpl) = de440() else { return };
+    let mut worst = 0.0f64;
+    for tt in instants() {
+        for b in BODIES {
+            let a = apparent(&Builtin, b, tt).unwrap();
+            let j = apparent(&jpl, b, tt).unwrap();
+            let d = ((a.longitude - j.longitude + 540.0).rem_euclid(360.0) - 180.0)
+                .abs()
+                .max((a.latitude - j.latitude).abs())
+                * 3600.0;
+            worst = worst.max(d);
+        }
+    }
+    println!("built-in slice against DE440: {worst:.6}″");
+    assert!(worst < 0.0005, "{worst:.6}″");
 }

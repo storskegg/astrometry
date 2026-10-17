@@ -74,6 +74,50 @@ impl Source for Jpl {
     }
 }
 
+/// DE440's Earth/Moon mass ratio.
+pub const EMRAT: f64 = 81.30056822149722;
+
+/// The built-in source: the slice of DE440 for 1800–2200 (see [`crate::slice`]), and the
+/// analytical theories outside it.
+#[derive(Debug, Default)]
+pub struct Builtin;
+
+impl Builtin {
+    /// The TDB Julian dates the slice covers.
+    pub fn span() -> (f64, f64) {
+        crate::slice::segment(301, 3).expect("the Moon").span()
+    }
+}
+
+impl Source for Builtin {
+    fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        let part = |target: i32, center: i32| -> Option<(Vec3, Vec3)> {
+            let (p, v) = crate::slice::segment(target, center)?.state(tdb)?;
+            Some((scale(1.0 / AU, p), scale(86400.0 / AU, v)))
+        };
+        let state = match body {
+            Body::Sun => part(10, 0),
+            Body::Mercury => part(1, 0),
+            Body::Venus => part(2, 0),
+            Body::Mars => part(4, 0),
+            Body::Jupiter => part(5, 0),
+            Body::Saturn => part(6, 0),
+            Body::Earth | Body::Moon => part(3, 0).zip(part(301, 3)).map(|((ep, ev), (mp, mv))| {
+                let k = if body == Body::Moon {
+                    1.0
+                } else {
+                    -1.0 / EMRAT
+                };
+                (add(ep, scale(k, mp)), add(ev, scale(k, mv)))
+            }),
+        };
+        match state {
+            Some(s) => Ok(s),
+            None => Analytic.state(body, tdb),
+        }
+    }
+}
+
 /// The analytical theories: VSOP87E for the Sun and planets, ELP/MPP02 for the Moon. Built in,
 /// needing no files.
 #[derive(Debug, Default)]
