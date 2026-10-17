@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use crate::spk::{self, Spk};
-use crate::vector::{Vec3, add, scale};
+use crate::vector::{Mat3, Vec3, add, scale};
+use crate::{elpmpp02, vsop87};
 
 /// A body an ephemeris gives. Mars to Saturn are their systems' barycentres, as the JPL DE
 /// ephemerides give them and the Swiss Ephemeris uses them.
@@ -70,5 +71,47 @@ impl Source for Jpl {
             state = (add(state.0, p), add(state.1, v));
         }
         Ok(state)
+    }
+}
+
+/// The analytical theories: VSOP87E for the Sun and planets, ELP/MPP02 for the Moon. Built in,
+/// needing no files.
+#[derive(Debug, Default)]
+pub struct Analytic;
+
+/// VSOP87's dynamical ecliptic and equinox of J2000 to the FK5 equator of J2000, as its
+/// documentation gives the rotation.
+const VSOP87_TO_FK5: Mat3 = Mat3([
+    [1.000000000000, 0.000000440360, -0.000000190919],
+    [-0.000000479966, 0.917482137087, -0.397776982902],
+    [0.000000000000, 0.397776982902, 0.917482137087],
+]);
+
+/// Days in a Julian millennium.
+const MILLENNIUM: f64 = 365250.0;
+
+impl Source for Analytic {
+    fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        let t = (tdb - 2451545.0) / MILLENNIUM;
+        let series = match body {
+            Body::Sun => &*vsop87::SUN,
+            Body::Mercury => &*vsop87::MERCURY,
+            Body::Venus => &*vsop87::VENUS,
+            Body::Earth | Body::Moon => &*vsop87::EARTH,
+            Body::Mars => &*vsop87::MARS,
+            Body::Jupiter => &*vsop87::JUPITER,
+            Body::Saturn => &*vsop87::SATURN,
+        };
+        let (p, v) = series.at(t);
+        let (mut p, mut v) = (
+            VSOP87_TO_FK5.apply(p),
+            VSOP87_TO_FK5.apply(scale(1.0 / MILLENNIUM, v)),
+        );
+        if body == Body::Moon {
+            let (mp, mv) = elpmpp02::moon(tdb - 2451545.0);
+            p = add(p, VSOP87_TO_FK5.apply(scale(1.0 / AU, mp)));
+            v = add(v, VSOP87_TO_FK5.apply(scale(1.0 / AU, mv)));
+        }
+        Ok((p, v))
     }
 }
