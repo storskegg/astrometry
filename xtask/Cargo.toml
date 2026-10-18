@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+description = "Repository tasks: the reference data and the built-in slice of DE440"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+astrometry = { path = ".." }
+flate2 = "1"
+
+[lints]
+workspace = true

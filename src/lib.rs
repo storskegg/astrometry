@@ -1,5 +1,5 @@
 //! Apparent positions of the Sun, the Moon and the planets, as close to JPL Horizons and the
-//! Swiss Ephemeris as we can make them. See `.ai/plans/12-ephemeris.md`.
+//! Swiss Ephemeris as we can make them. See the README.
 
 pub mod apparent;
 mod cheb;

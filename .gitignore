@@ -1,0 +1,7 @@
+/target
+
+# Per-user IDE state.
+/.idea/
+
+# Python bytecode, from the fixture scripts.
+__pycache__/

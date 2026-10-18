@@ -1,4 +1,4 @@
-//! E4 (plan 12): speeds and nodes against the Swiss Ephemeris (JPL mode).
+//! Speeds and nodes against the Swiss Ephemeris (JPL mode).
 
 use std::path::PathBuf;
 

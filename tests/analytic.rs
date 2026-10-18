@@ -1,4 +1,4 @@
-//! E3's gate (plan 12): the analytical source (VSOP87E, ELP/MPP02) against DE440, over
+//! The analytical source (VSOP87E, ELP/MPP02) against DE440, over
 //! 1800–2200.
 
 use std::path::PathBuf;

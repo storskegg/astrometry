@@ -1,4 +1,4 @@
-//! E2's gate (plan 12): DE440 through the reduction chain, against JPL Horizons and the Swiss
+//! DE440 through the reduction chain, against JPL Horizons and the Swiss
 //! Ephemeris.
 //!
 //! DE440 (120 MB) isn't in the repository: these tests read it from `ASTROMETRY_DE440`, or

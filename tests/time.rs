@@ -1,4 +1,4 @@
-//! E1's gate (plan 12): time against JPL Horizons and the Swiss Ephemeris.
+//! Time against JPL Horizons and the Swiss Ephemeris.
 
 use astrometry::time::{self, DAY, UTC_FROM};
 
