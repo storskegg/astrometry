@@ -1,6 +1,7 @@
 //! Apparent positions of the Sun, the Moon and the planets, as close to JPL Horizons and the
 //! Swiss Ephemeris as we can make them. See the README.
 
+pub mod angles;
 pub mod apparent;
 mod cheb;
 pub mod derived;
@@ -13,6 +14,7 @@ pub mod sidereal;
 pub mod slice;
 pub mod source;
 pub mod spk;
+pub mod stations;
 pub mod time;
 pub mod vector;
 pub mod vsop87;

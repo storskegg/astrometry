@@ -1,9 +1,10 @@
-//! Quantities derived from positions: speeds in longitude, and the lunar nodes.
+//! Quantities derived from positions: speeds in longitude, the lunar nodes, and how the Moon
+//! is lit.
 
 use crate::apparent::apparent;
 use crate::nutation::nutation;
 use crate::precession::gcrs_to_ecliptic_of_date;
-use crate::source::{Body, Source};
+use crate::source::{AU, Body, Source};
 use crate::spk;
 use crate::time::{DAY, centuries, tdb_minus_tt};
 use crate::vector::{cross, sub};
@@ -47,4 +48,18 @@ pub fn mean_node(tt: f64) -> f64 {
 /// The speed of the true node, degrees per day.
 pub fn true_node_speed(src: &dyn Source, tt: f64) -> Result<f64, spk::Error> {
     Ok(diff(true_node(src, tt + STEP)?, true_node(src, tt - STEP)?) / (2.0 * STEP))
+}
+
+/// How the Moon is lit at TT Julian date `tt`: its elongation, the Moon's apparent longitude
+/// less the Sun's, degrees 0–360; and the fraction of its disc lit, 0 to 1. The phase angle,
+/// Sun–Moon–Earth, from the elongation and the distances (Meeus 48.3), ignoring the Moon's
+/// latitude.
+pub fn moon_light(src: &dyn Source, tt: f64) -> Result<(f64, f64), spk::Error> {
+    let sun = apparent(src, Body::Sun, tt)?;
+    let moon = apparent(src, Body::Moon, tt)?;
+    let elongation = (moon.longitude - sun.longitude).rem_euclid(360.0);
+    let (sun_km, moon_km) = (sun.distance * AU, moon.distance * AU);
+    let psi = diff(moon.longitude, sun.longitude).abs().to_radians();
+    let i = (sun_km * psi.sin()).atan2(moon_km - sun_km * psi.cos());
+    Ok((elongation, (1.0 + i.cos()) / 2.0))
 }

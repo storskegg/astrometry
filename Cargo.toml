@@ -1,7 +1,7 @@
 [package]
 name = "astrometry"
 description = "Apparent positions of the Sun, Moon and planets, as close to JPL Horizons as we can make them"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -12,15 +12,20 @@ categories = ["science", "date-and-time"]
 # Not on crates.io for now: packaged, it's just over its 10 MiB.
 publish = false
 
+[features]
+# Serialize and Deserialize for the angles and stations.
+serde = ["dep:serde"]
+
 [dependencies]
 flate2 = "1"
+serde = { version = "1", features = ["derive"], optional = true }
 
 [lints]
 workspace = true
 
 [workspace]
 resolver = "3"
-members = [".", "xtask"]
+members = [".", "horae", "xtask"]
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -14,9 +14,15 @@ Rust.
   2000A_R06 nutation, to the true equinox and ecliptic of date.
 - **Time:** UTC, UT1, TT and TDB, with ΔT from Horizons, the IERS and USNO, and the leap
   seconds.
-- **Derived quantities:** speeds in longitude, the Moon's true and mean nodes, sidereal time,
-  the Sun's altitude and its crossings (rise and set), and the search for events such as new
-  and full moons and ingresses.
+- **Derived quantities:** speeds in longitude, the Moon's true and mean nodes and how it's
+  lit, sidereal time, the Sun's altitude and its crossings (rise and set), the Ascendant and
+  Midheaven, the planets' stations, and the search for events such as new and full moons and
+  ingresses.
+
+And beside it, in [`horae/`](horae), **horae**: the traditional astrology these are for. The
+signs, the dignities, the Ptolemaic aspects with Lilly's orbs, the Moon's phases and course
+(void of course), and the planetary days and hours. Both are Apache-2.0: an ephemeris and an
+astrology that are neither copyleft nor costly to license.
 
 ## Accuracy
 
@@ -44,8 +50,12 @@ println!("{:.5}° {:.5}°", sun.longitude, sun.latitude);
 dependency:
 
 ```toml
-astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v1.0.0" }
+astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v1.1.0" }
+horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.1.0" }
 ```
+
+The two are versioned together and tagged once: take both at the same tag, or Cargo sees two
+astrometries.
 
 ## The tests and the data
 

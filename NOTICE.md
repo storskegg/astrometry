@@ -1,6 +1,6 @@
 # Notices
 
-astrometry is licensed under the Apache License 2.0 (see LICENSE). It builds in the following
+astrometry and horae are licensed under the Apache License 2.0 (see LICENSE). It builds in the following
 data, under their own terms.
 
 | Data | Where | Source | Terms |
