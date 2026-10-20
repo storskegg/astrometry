@@ -12,8 +12,9 @@ Rust.
 - **The reduction as Horizons and the Swiss Ephemeris have it:** light time, the Sun's
   deflection of light, relativistic annual aberration, IAU 2006 precession and IAU
   2000A_R06 nutation, to the true equinox and ecliptic of date.
-- **Time:** UTC, UT1, TT and TDB, with ΔT from Horizons, the IERS and USNO, and the leap
-  seconds.
+- **Time:** UTC, UT1, TT and TDB, with ΔT from Horizons, the IERS and USNO, then the
+  IERS's predictions a year ahead (held after, as Horizons holds its own), and the leap
+  seconds. `cargo xtask fixtures usno` brings them up to date.
 - **Derived quantities:** speeds in longitude, the Moon's true and mean nodes and how it's
   lit, sidereal time, the Sun's altitude and its crossings (rise and set), the Ascendant and
   Midheaven, the planets' stations, and the search for events such as new and full moons and
@@ -50,12 +51,13 @@ println!("{:.5}° {:.5}°", sun.longitude, sun.latitude);
 dependency:
 
 ```toml
-astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v1.1.0" }
-horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.1.0" }
+astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v1.2.0" }
+horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.2.0" }
 ```
 
 The two are versioned together and tagged once: take both at the same tag, or Cargo sees two
-astrometries.
+astrometries. The `serde` feature (of either) serializes their results; horae's names its
+members, as "North Node" and "Under the beams".
 
 ## The tests and the data
 
