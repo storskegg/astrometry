@@ -159,7 +159,19 @@ impl Spk {
     /// The position (km) and velocity (km/s) of `target` relative to `center` at TDB Julian
     /// date `jd`, in the file's frame (ICRF for the DE ephemerides).
     pub fn state(&self, target: i32, center: i32, jd: f64) -> Result<([f64; 3], [f64; 3]), Error> {
-        let et = (jd - 2451545.0) * 86400.0;
+        self.state_after(target, center, jd, 0.0)
+    }
+
+    /// As [`Spk::state`], `secs` seconds after `jd`, the two kept apart until they're seconds
+    /// past J2000 (see [`crate::source::Source::state_after`]).
+    pub fn state_after(
+        &self,
+        target: i32,
+        center: i32,
+        jd: f64,
+        secs: f64,
+    ) -> Result<([f64; 3], [f64; 3]), Error> {
+        let et = (jd - 2451545.0) * 86400.0 + secs;
         let (i, s) = self
             .segments
             .iter()

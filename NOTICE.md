@@ -9,7 +9,7 @@ data, under their own terms.
 | Planetary theory | `data/vsop87` | VSOP87E (P. Bretagnon and G. Francou, *A&A* 202, 309, 1988), from IMCCE | published theory; no licence stated |
 | Lunar theory | `data/elpmpp02` | ELP/MPP02 (J. Chapront and G. Francou, *A&A* 404, 735, 2003), the authors' series from the Paris Observatory's distribution | published theory; no licence stated |
 | Nutation series | `data/iers-tab5.3*.txt` | IAU 2000A_R06, IERS Conventions (2010), chapter 5 | IERS |
-| Earth rotation and time | `data/*.tsv`, `data/leap-seconds.list` | JPL Horizons' ΔT, IERS EOP 20 C04, USNO, the IANA leap second list | public data |
+| Earth rotation and time | `data/*.tsv`, `data/leap-seconds.list` | JPL Horizons' ΔT, IERS EOP 20 C04, USNO, the IERS's Bulletin A (rapid values and predictions, from USNO), the IANA leap second list | public data |
 
 The tests compare against numbers from JPL Horizons and from the Swiss Ephemeris
 (`tests/data`). The Swiss Ephemeris is AGPL-3.0 or commercial, so none of its code is here:

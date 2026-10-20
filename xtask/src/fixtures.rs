@@ -9,6 +9,8 @@
 //!   1962.
 //! - `data/usno-tt-ut1.tsv`: USNO's monthly TT − UT1, after the IERS series
 //!   ends.
+//! - `data/iers-bulletin-a.tsv`: the IERS's Bulletin A UT1 − UTC, daily after USNO's series:
+//!   its rapid values, then its predictions a year ahead.
 //! - `data/leap-seconds.list`: the IANA leap second list.
 //! - `data/iers-tab5.3a.txt` and `iers-tab5.3b.txt`: the IAU 2000A_R06
 //!   nutation series, from the IERS Conventions (2010), chapter 5.
@@ -211,7 +213,7 @@ fn horizons_at(body: &str, center: &str, params: &[(&str, &str)]) -> Result<Vec<
 
 /// The Earth's rotation from 1962: IERS's UT1 − UTC (EOP 20 C04, daily at 0h UTC) on the
 /// first of each month while it lasts, then USNO's monthly TT − UT1, which runs a little
-/// later.
+/// later, then the IERS's Bulletin A, daily: its rapid values and its predictions, a year on.
 fn usno() -> Result {
     let c04 =
         fetch("https://datacenter.iers.org/data/latestVersion/EOP_20_C04_one_file_1962-now.txt")?;
@@ -249,10 +251,42 @@ fn usno() -> Result {
             );
             if day > last {
                 writeln!(out, "{day:.1}\t{dt}").unwrap();
+                last = day;
             }
         }
     }
-    write_file("data/usno-tt-ut1.tsv", &out)
+    write_file("data/usno-tt-ut1.tsv", &out)?;
+
+    // finals2000A.all, fixed columns: the MJD in 8–15, then UT1 − UTC's flag (I, rapid; P,
+    // predicted) in 58 and its value in 59–68.
+    let finals = fetch("https://maia.usno.navy.mil/ser7/finals2000A.all")?;
+    let mut out = String::from(
+        "# The IERS's Bulletin A UT1 - UTC, seconds, daily at 0h UTC (finals2000A.all, from USNO),\n\
+         # after USNO's series: rapid values (I), then predictions (P). Fetched by\n\
+         # `cargo xtask fixtures`; don't edit.\n# jd_utc\tUT1-UTC\tflag\n",
+    );
+    let mut predicted = 0;
+    for line in finals.lines() {
+        let (Some(mjd), Some(flag), Some(dut)) =
+            (line.get(7..15), line.get(57..58), line.get(58..68))
+        else {
+            continue;
+        };
+        let (Ok(mjd), Ok(dut)) = (mjd.trim().parse::<f64>(), dut.trim().parse::<f64>()) else {
+            continue;
+        };
+        let day = mjd + 2400000.5;
+        if day > last && matches!(flag, "I" | "P") {
+            writeln!(out, "{day:.1}\t{dut}\t{flag}").unwrap();
+            predicted += usize::from(flag == "P");
+        }
+    }
+    if predicted < 300 {
+        return Err(format!(
+            "finals2000A.all: {predicted} days of predictions, not a year"
+        ));
+    }
+    write_file("data/iers-bulletin-a.tsv", &out)
 }
 
 /// Horizons' TDB − UT (quantity 30) on the first of each month from 1800 to 2200: as a

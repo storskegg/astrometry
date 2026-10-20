@@ -40,7 +40,8 @@ fn clock_time_as_horizons_reads_it() {
 /// Earth's seasonal variation, ±30 ms, so the two part by up to 65 ms in May and June), and
 /// before 1962 within the difference between Horizons' values (ours) and the Swiss
 /// Ephemeris' model (Stephenson, Morrison and Hohenkerk 2016). Beyond the observations they
-/// part: the Swiss Ephemeris extrapolates, ours holds, as Horizons does.
+/// part: the Swiss Ephemeris extrapolates, ours follows Bulletin A's predictions for a year,
+/// then holds, as Horizons does.
 #[test]
 fn delta_t_against_swiss_ephemeris() {
     let mut worst = [0.0f64; 3];

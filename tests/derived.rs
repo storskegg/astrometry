@@ -77,14 +77,15 @@ fn sidereal_against_horizons() {
         let want: f64 = r[1].parse().unwrap();
         let got = gast(ut1_from_tt(tt), tt).to_degrees() / 15.0;
         let d = ((got - want + 36.0).rem_euclid(24.0) - 12.0).abs() * 3600.0;
-        let future = tt > 2461314.5; // after the last observation of ΔT
+        let future = tt > 2461682.5; // after Bulletin A's last prediction of ΔT
         worst[usize::from(future)] = worst[usize::from(future)].max(d);
     }
     println!(
         "sidereal time against Horizons: observed era {:.4} s, after {:.3} s",
         worst[0], worst[1]
     );
-    // UT1 interpolated monthly where it's observed; held at its last value after, as Horizons.
+    // UT1 interpolated where it's observed or predicted; held at its last prediction after, as
+    // Horizons holds it (the two editions of Bulletin A differing, as they're fetched apart).
     assert!(
         worst[0] < 0.05 && worst[1] < 0.2,
         "{:.4} s, {:.3} s",

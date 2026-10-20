@@ -41,7 +41,13 @@ impl Segment {
 
     /// Position (km) and velocity (km/s) at TDB Julian date `jd`, if it's covered.
     pub fn state(&self, jd: f64) -> Option<([f64; 3], [f64; 3])> {
-        let et = (jd - 2451545.0) * 86400.0;
+        self.state_after(jd, 0.0)
+    }
+
+    /// As [`Segment::state`], `secs` seconds after `jd`, the two kept apart until they're
+    /// seconds past J2000 (see [`crate::source::Source::state_after`]).
+    pub fn state_after(&self, jd: f64, secs: f64) -> Option<([f64; 3], [f64; 3])> {
+        let et = (jd - 2451545.0) * 86400.0 + secs;
         let r = ((et - self.init) / self.interval).floor();
         if r < 0.0 || r as usize >= self.records {
             return None;

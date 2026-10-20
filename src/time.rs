@@ -233,6 +233,15 @@ static IERS: LazyLock<Table> = LazyLock::new(|| {
 static USNO: LazyLock<Table> =
     LazyLock::new(|| Table::parse(include_str!("../data/usno-tt-ut1.tsv"), |_, tt_ut1| tt_ut1));
 
+/// The IERS's Bulletin A after USNO's series: its rapid values, then its predictions a year
+/// ahead, daily, as TT − UT1.
+static BULLETIN_A: LazyLock<Table> = LazyLock::new(|| {
+    Table::parse(
+        include_str!("../data/iers-bulletin-a.tsv"),
+        |jd, ut1_utc| TT_TAI + tai_minus_utc(jd) - ut1_utc,
+    )
+});
+
 /// ΔT, TT − UT1, in seconds at UT1 Julian date `jd`:
 ///
 /// - before 1800, Espenak and Meeus's polynomials (NASA, Five Millennium Canon of Solar
@@ -240,8 +249,9 @@ static USNO: LazyLock<Table> =
 /// - from 1800 to Horizons' switch to UTC in January 1962, Horizons' own values, monthly, so
 ///   clock times before then mean what they mean to Horizons;
 /// - from then, observed values: IERS's (EOP 20 C04), monthly, then USNO's, which run a
-///   little later;
-/// - beyond the last observation, held at it, as Horizons holds it.
+///   little later, then the IERS's rapid values (Bulletin A), daily;
+/// - then Bulletin A's predictions, daily for a year;
+/// - beyond the last prediction, held at it, as Horizons holds it.
 pub fn delta_t(jd: f64) -> f64 {
     let (h0, v0) = HORIZONS.first();
     if jd < h0 {
@@ -259,12 +269,19 @@ pub fn delta_t(jd: f64) -> f64 {
     if jd < IERS.first().0 {
         return IERS.first().1;
     }
-    // Between the two series, and through USNO's.
-    let (i, u) = (IERS.last(), USNO.first());
-    if jd < u.0 {
-        return i.1 + (u.1 - i.1) * (jd - i.0) / (u.0 - i.0);
+    // USNO's, then Bulletin A's, each joined to the one before.
+    let mut prev = IERS.last();
+    for table in [&*USNO, &*BULLETIN_A] {
+        let first = table.first();
+        if jd < first.0 {
+            return prev.1 + (first.1 - prev.1) * (jd - prev.0) / (first.0 - prev.0);
+        }
+        if let Some(v) = table.at(jd).filter(|_| jd <= table.last().0) {
+            return v;
+        }
+        prev = table.last();
     }
-    USNO.at(jd).unwrap_or(USNO.last().1)
+    prev.1
 }
 
 /// Espenak and Meeus's ΔT polynomials before 1800, for decimal year `y`.
@@ -372,5 +389,20 @@ mod tests {
         let jd = julian_date(1650, 7, 1, 0, 0, 0.0);
         let y = 2000.0 + (jd - J2000) / 365.25;
         assert_eq!(delta_t(jd), espenak_meeus(y));
+    }
+
+    // Through the observed and predicted series: no step where one table hands on to the
+    // next, and held after Bulletin A's last prediction.
+    #[test]
+    fn delta_t_is_continuous_after_1962() {
+        let eps = 1e-6;
+        for (name, t) in [("USNO", &*USNO), ("Bulletin A", &*BULLETIN_A)] {
+            let (jd, v) = t.first();
+            assert!((delta_t(jd - eps) - v).abs() < 0.01, "into {name}");
+        }
+        let (end, v) = BULLETIN_A.last();
+        assert!(end - BULLETIN_A.first().0 > 300.0, "a year of predictions");
+        assert_eq!(delta_t(end + 1.0), v);
+        assert_eq!(delta_t(end + 36525.0), v);
     }
 }

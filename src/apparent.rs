@@ -50,15 +50,17 @@ fn aberrate(p: Vec3, v: Vec3, s: f64) -> Vec3 {
 
 /// The apparent geocentric position of `body` at TT Julian date `tt`.
 pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::Error> {
-    let tdb = tt + tdb_minus_tt(tt) / DAY;
-    let (earth, earth_v) = src.state(Body::Earth, tdb)?;
-    let (sun, _) = src.state(Body::Sun, tdb)?;
+    // TDB, and the light time, as seconds from `tt`, not added to it (see
+    // `Source::state_after`).
+    let tdb_tt = tdb_minus_tt(tt);
+    let (earth, earth_v) = src.state_after(Body::Earth, tt, tdb_tt)?;
+    let (sun, _) = src.state_after(Body::Sun, tt, tdb_tt)?;
 
     // Light time: where the body was when the light now arriving left it.
     let mut tau = 0.0;
     let mut at = earth;
     for _ in 0..4 {
-        at = src.state(body, tdb - tau)?.0;
+        at = src.state_after(body, tt, tdb_tt - tau * DAY)?.0;
         tau = norm(sub(at, earth)) / C;
     }
     let u = sub(at, earth);
@@ -66,7 +68,7 @@ pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::
     let mut p = unit(u);
 
     if body != Body::Sun {
-        let (sun_then, _) = src.state(Body::Sun, tdb - tau)?;
+        let (sun_then, _) = src.state_after(Body::Sun, tt, tdb_tt - tau * DAY)?;
         let q = unit(sub(at, sun_then));
         let e = sub(earth, sun);
         p = deflect(p, q, unit(e), norm(e));
@@ -82,4 +84,26 @@ pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::
         distance,
         direction: p,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::Builtin;
+
+    // The Moon's apparent longitude, sampled every 43 s, is smooth: its second differences
+    // keep to the curve's, without the steps a light time added to the date makes as the date
+    // rounds (up to 0.0007″ before it was kept apart).
+    #[test]
+    fn moon_is_smooth() {
+        let (jd, h) = (2501825.033912, 0.0005);
+        let lon = |t: f64| apparent(&Builtin, Body::Moon, t).unwrap().longitude * 3600.0;
+        let d2: Vec<f64> = (-10..10)
+            .map(|k| jd + f64::from(k) * h)
+            .map(|t| lon(t + h) - 2.0 * lon(t) + lon(t - h))
+            .collect();
+        let mean = d2.iter().sum::<f64>() / d2.len() as f64;
+        let worst = d2.iter().map(|d| (d - mean).abs()).fold(0.0, f64::max);
+        assert!(worst < 1e-4, "second differences part by {worst:.6}″");
+    }
 }

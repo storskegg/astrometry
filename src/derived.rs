@@ -6,7 +6,7 @@ use crate::nutation::nutation;
 use crate::precession::gcrs_to_ecliptic_of_date;
 use crate::source::{AU, Body, Source};
 use crate::spk;
-use crate::time::{DAY, centuries, tdb_minus_tt};
+use crate::time::{centuries, tdb_minus_tt};
 use crate::vector::{cross, sub};
 
 /// The step of the symmetric differences, days.
@@ -28,9 +28,9 @@ pub fn speed(src: &dyn Source, body: Body, tt: f64) -> Result<f64, spk::Error> {
 /// The true node: the ascending node of the Moon's osculating geocentric orbit on the ecliptic
 /// of date, from the true equinox, degrees.
 pub fn true_node(src: &dyn Source, tt: f64) -> Result<f64, spk::Error> {
-    let tdb = tt + tdb_minus_tt(tt) / DAY;
-    let (mp, mv) = src.state(Body::Moon, tdb)?;
-    let (ep, ev) = src.state(Body::Earth, tdb)?;
+    let tdb_tt = tdb_minus_tt(tt);
+    let (mp, mv) = src.state_after(Body::Moon, tt, tdb_tt)?;
+    let (ep, ev) = src.state_after(Body::Earth, tt, tdb_tt)?;
     let m = gcrs_to_ecliptic_of_date(tt);
     let h = cross(m.apply(sub(mp, ep)), m.apply(sub(mv, ev)));
     Ok(h[0].atan2(-h[1]).to_degrees().rem_euclid(360.0))

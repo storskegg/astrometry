@@ -26,6 +26,14 @@ pub const AU: f64 = 149_597_870.7;
 /// Barycentric positions (au) and velocities (au/day) in ICRF axes, at a TDB Julian date.
 pub trait Source: Send + Sync {
     fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error>;
+
+    /// The state `secs` seconds after TDB Julian date `tdb`, the two kept apart: a Julian date
+    /// resolves time only to some 40 µs, in which the barycentric Moon moves a metre, so a
+    /// light time or TDB − TT added to it would be rounded. By default, [`Source::state`] at
+    /// their sum.
+    fn state_after(&self, body: Body, tdb: f64, secs: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        self.state(body, tdb + secs / 86400.0)
+    }
 }
 
 /// A JPL DE ephemeris, from an SPK file such as de440.bsp.
@@ -47,14 +55,24 @@ impl Jpl {
     }
 
     /// A segment's state in au and au/day.
-    fn part(&self, target: i32, center: i32, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
-        let (p, v) = self.spk.state(target, center, tdb)?;
+    fn part(
+        &self,
+        target: i32,
+        center: i32,
+        tdb: f64,
+        secs: f64,
+    ) -> Result<(Vec3, Vec3), spk::Error> {
+        let (p, v) = self.spk.state_after(target, center, tdb, secs)?;
         Ok((scale(1.0 / AU, p), scale(86400.0 / AU, v)))
     }
 }
 
 impl Source for Jpl {
     fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        self.state_after(body, tdb, 0.0)
+    }
+
+    fn state_after(&self, body: Body, tdb: f64, secs: f64) -> Result<(Vec3, Vec3), spk::Error> {
         let chain: &[(i32, i32)] = match body {
             Body::Sun => &[(10, 0)],
             Body::Mercury => &[(1, 0), (199, 1)],
@@ -67,7 +85,7 @@ impl Source for Jpl {
         };
         let mut state = ([0.0; 3], [0.0; 3]);
         for &(target, center) in chain {
-            let (p, v) = self.part(target, center, tdb)?;
+            let (p, v) = self.part(target, center, tdb, secs)?;
             state = (add(state.0, p), add(state.1, v));
         }
         Ok(state)
@@ -91,8 +109,12 @@ impl Builtin {
 
 impl Source for Builtin {
     fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        self.state_after(body, tdb, 0.0)
+    }
+
+    fn state_after(&self, body: Body, tdb: f64, secs: f64) -> Result<(Vec3, Vec3), spk::Error> {
         let part = |target: i32, center: i32| -> Option<(Vec3, Vec3)> {
-            let (p, v) = crate::slice::segment(target, center)?.state(tdb)?;
+            let (p, v) = crate::slice::segment(target, center)?.state_after(tdb, secs)?;
             Some((scale(1.0 / AU, p), scale(86400.0 / AU, v)))
         };
         let state = match body {
@@ -113,7 +135,7 @@ impl Source for Builtin {
         };
         match state {
             Some(s) => Ok(s),
-            None => Analytic.state(body, tdb),
+            None => Analytic.state_after(body, tdb, secs),
         }
     }
 }
