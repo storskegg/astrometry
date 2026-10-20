@@ -208,9 +208,11 @@ mod json {
         if std::env::var_os("HORAE_BLESS").is_some() {
             std::fs::write(path, &text).unwrap();
         }
+        // By lines: Git may check it out with CRLFs.
         let want = std::fs::read_to_string(path).expect("tests/data/json-shape.txt");
         assert_eq!(
-            text, want,
+            text.lines().collect::<Vec<_>>(),
+            want.lines().collect::<Vec<_>>(),
             "the JSON shape changed: astro-clock's caches depend on it (HORAE_BLESS=1 rewrites \
              the file, once it's agreed)"
         );
