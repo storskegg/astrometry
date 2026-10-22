@@ -1,7 +1,7 @@
 [package]
 name = "horae"
 description = "Traditional astrology on the astrometry ephemeris: signs, dignities, aspects, the Moon, and the planetary days and hours"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -12,10 +12,13 @@ categories = ["science", "date-and-time"]
 publish = false
 
 [features]
+default = ["embedded"]
+# astrometry's: the DE440 slice compiled in, or given by `astrometry::slice::install`.
+embedded = ["astrometry/embedded"]
 serde = ["dep:serde", "jiff/serde", "astrometry/serde"]
 
 [dependencies]
-astrometry = { path = "..", version = "1.2.0" }
+astrometry = { path = "..", version = "1.3.0", default-features = false }
 jiff = "0.2"
 serde = { version = "1", features = ["derive"], optional = true }
 

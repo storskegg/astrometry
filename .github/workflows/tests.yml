@@ -35,8 +35,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      # Without the slice compiled in, as a browser's build has it.
+      - run: cargo clippy -p astrometry -p horae --all-targets --no-default-features --locked -- -D warnings
+      - run: cargo check -p horae --no-default-features --target wasm32-unknown-unknown --locked
 
   test:
     strategy:
@@ -58,6 +62,7 @@ jobs:
         run: test -f "$RUNNER_TEMP/de440.bsp" || curl -sS --fail -L -o "$RUNNER_TEMP/de440.bsp" https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp
       # With the features too: horae's serde, whose JSON astro-clock caches.
       - run: cargo test --workspace --all-features --locked
+      - run: cargo test -p astrometry --no-default-features --lib --locked slice::
         env:
           # Set on Linux only, where the tests then require it.
           ASTROMETRY_DE440: ${{ matrix.os == 'ubuntu-latest' && format('{0}/de440.bsp', runner.temp) || '' }}

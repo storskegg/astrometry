@@ -15,7 +15,7 @@
 //! deflated as a whole.
 
 use std::io::Read;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use flate2::read::DeflateDecoder;
 
@@ -138,13 +138,56 @@ pub fn decode(deflated: &[u8]) -> Result<Vec<Segment>, String> {
     Ok(out)
 }
 
-static SLICE: LazyLock<Vec<Segment>> = LazyLock::new(|| {
-    decode(include_bytes!("../data/de440-1800-2200.bin")).expect("the built-in slice")
-});
+static SLICE: OnceLock<Vec<Segment>> = OnceLock::new();
 
-/// The built-in slice's segment for `target` relative to `center`.
-pub fn segment(target: i32, center: i32) -> Option<&'static Segment> {
+/// Installs the slice from its bytes, `data/de440-1800-2200.bin`, for a build without the
+/// `embedded` feature (a browser's, which fetches them after it starts). Once per process: an
+/// error if it's installed already, as it always is with `embedded`, or if the bytes aren't a
+/// slice.
+pub fn install(bytes: &[u8]) -> Result<(), String> {
+    if SLICE.get().is_some() || cfg!(feature = "embedded") {
+        return Err("slice: installed already".into());
+    }
     SLICE
+        .set(decode(bytes)?)
+        .map_err(|_| "slice: installed already".into())
+}
+
+/// Whether the slice is there: always with `embedded`, otherwise once [`install`]ed.
+pub fn installed() -> bool {
+    cfg!(feature = "embedded") || SLICE.get().is_some()
+}
+
+fn slice() -> &'static [Segment] {
+    #[cfg(feature = "embedded")]
+    return SLICE.get_or_init(|| {
+        decode(include_bytes!("../data/de440-1800-2200.bin")).expect("the built-in slice")
+    });
+    #[cfg(not(feature = "embedded"))]
+    SLICE.get().expect(
+        "astrometry: the DE440 slice isn't installed (built without `embedded`: call \
+         astrometry::slice::install first)",
+    )
+}
+
+/// The built-in slice's segment for `target` relative to `center`. Panics if the slice isn't
+/// [`install`]ed in a build without `embedded`, rather than fall back to the theories unseen.
+pub fn segment(target: i32, center: i32) -> Option<&'static Segment> {
+    slice()
         .iter()
         .find(|s| s.target == target && s.center == center)
+}
+
+#[cfg(all(test, not(feature = "embedded")))]
+mod tests {
+    #[test]
+    fn install_from_bytes() {
+        assert!(!super::installed());
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/data/de440-1800-2200.bin");
+        let bytes = std::fs::read(path).unwrap();
+        assert!(super::install(b"not a slice").is_err());
+        super::install(&bytes).unwrap();
+        assert!(super::installed() && super::install(&bytes).is_err());
+        assert!(super::segment(301, 3).is_some());
+    }
 }
