@@ -62,10 +62,11 @@ jobs:
         run: test -f "$RUNNER_TEMP/de440.bsp" || curl -sS --fail -L -o "$RUNNER_TEMP/de440.bsp" https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp
       # With the features too: horae's serde, whose JSON astro-clock caches.
       - run: cargo test --workspace --all-features --locked
-      - run: cargo test -p astrometry --no-default-features --lib --locked slice::
         env:
           # Set on Linux only, where the tests then require it.
           ASTROMETRY_DE440: ${{ matrix.os == 'ubuntu-latest' && format('{0}/de440.bsp', runner.temp) || '' }}
+      # Without the slice compiled in: installed from its bytes.
+      - run: cargo test -p astrometry --no-default-features --lib --locked slice::tests
 
   msrv:
     runs-on: ubuntu-latest
