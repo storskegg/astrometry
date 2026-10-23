@@ -13,9 +13,12 @@ categories = ["science", "date-and-time"]
 publish = false
 
 [features]
-default = ["embedded"]
+default = ["embedded", "theories"]
 # The DE440 slice compiled in (8 MB). Without it, `slice::install` takes its bytes at run time.
 embedded = []
+# VSOP87E and ELP/MPP02 (some 2 MB of series), for dates beyond the slice; without them,
+# those are errors.
+theories = []
 # Serialize and Deserialize for the angles and stations.
 serde = ["dep:serde"]
 

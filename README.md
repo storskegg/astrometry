@@ -58,7 +58,8 @@ horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.3.0" }
 The two are versioned together and tagged once: take both at the same tag, or Cargo sees two
 astrometries. The `embedded` feature, on by default, compiles the DE440 slice in; with
 `default-features = false` on both, `astrometry::slice::install(&bytes)` takes
-`data/de440-1800-2200.bin` at run time instead (a browser's build, say). The `serde` feature
+`data/de440-1800-2200.bin` at run time instead (a browser's build, say), and without `theories`, also on by default, dates beyond 1800–2200
+are errors, not VSOP87E and ELP/MPP02's. The `serde` feature
 (of either) serializes their results; horae's names its
 members, as "North Node" and "Under the beams".
 

@@ -3,7 +3,10 @@
 use std::path::Path;
 
 use crate::spk::{self, Spk};
-use crate::vector::{Mat3, Vec3, add, scale};
+#[cfg(feature = "theories")]
+use crate::vector::Mat3;
+use crate::vector::{Vec3, add, scale};
+#[cfg(feature = "theories")]
 use crate::{elpmpp02, vsop87};
 
 /// A body an ephemeris gives. Mars to Saturn are their systems' barycentres, as the JPL DE
@@ -141,10 +144,12 @@ impl Source for Builtin {
 }
 
 /// The analytical theories: VSOP87E for the Sun and planets, ELP/MPP02 for the Moon. Built in,
-/// needing no files.
+/// needing no files; without the `theories` feature, none, and every date an error (so the
+/// built-in source has only its slice's 1800–2200).
 #[derive(Debug, Default)]
 pub struct Analytic;
 
+#[cfg(feature = "theories")]
 /// VSOP87's dynamical ecliptic and equinox of J2000 to the FK5 equator of J2000, as its
 /// documentation gives the rotation.
 const VSOP87_TO_FK5: Mat3 = Mat3([
@@ -153,10 +158,31 @@ const VSOP87_TO_FK5: Mat3 = Mat3([
     [0.000000000000, 0.397776982902, 0.917482137087],
 ]);
 
+#[cfg(feature = "theories")]
 /// Days in a Julian millennium.
 const MILLENNIUM: f64 = 365250.0;
 
 impl Source for Analytic {
+    #[cfg(not(feature = "theories"))]
+    fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
+        let target = match body {
+            Body::Sun => 10,
+            Body::Moon => 301,
+            Body::Mercury => 1,
+            Body::Venus => 2,
+            Body::Earth => 399,
+            Body::Mars => 4,
+            Body::Jupiter => 5,
+            Body::Saturn => 6,
+        };
+        Err(spk::Error::NoSegment {
+            target,
+            center: 0,
+            jd: tdb,
+        })
+    }
+
+    #[cfg(feature = "theories")]
     fn state(&self, body: Body, tdb: f64) -> Result<(Vec3, Vec3), spk::Error> {
         let t = (tdb - 2451545.0) / MILLENNIUM;
         let series = match body {

@@ -12,9 +12,11 @@ categories = ["science", "date-and-time"]
 publish = false
 
 [features]
-default = ["embedded"]
+default = ["embedded", "theories"]
 # astrometry's: the DE440 slice compiled in, or given by `astrometry::slice::install`.
 embedded = ["astrometry/embedded"]
+# astrometry's: VSOP87E and ELP/MPP02 beyond 1800–2200, or errors there.
+theories = ["astrometry/theories"]
 serde = ["dep:serde", "jiff/serde", "astrometry/serde"]
 
 [dependencies]

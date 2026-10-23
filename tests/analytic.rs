@@ -1,5 +1,6 @@
 //! The analytical source (VSOP87E, ELP/MPP02) against DE440, over
 //! 1800–2200.
+#![cfg(feature = "theories")]
 
 use std::path::PathBuf;
 

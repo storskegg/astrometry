@@ -5,6 +5,7 @@ pub mod angles;
 pub mod apparent;
 mod cheb;
 pub mod derived;
+#[cfg(feature = "theories")]
 pub mod elpmpp02;
 pub mod events;
 pub mod horizon;
@@ -17,4 +18,5 @@ pub mod spk;
 pub mod stations;
 pub mod time;
 pub mod vector;
+#[cfg(feature = "theories")]
 pub mod vsop87;
