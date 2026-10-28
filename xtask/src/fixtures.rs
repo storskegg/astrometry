@@ -530,8 +530,8 @@ fn sidereal() -> Result {
     write_file("tests/data/horizons/sidereal.tsv", &out)
 }
 
-/// Horizons' sunrises and sunsets on the true visual horizon (R_T_S_ONLY='TVH'), at sites and
-/// dates the tests use, polar days and nights included.
+/// Horizons' sunrises, sunsets and upper transits on the true visual horizon
+/// (R_T_S_ONLY='TVH'), at sites and dates the tests use, polar days and nights included.
 fn rise_set() -> Result {
     let sites = [
         ("Madison", "-89.4012,43.0731,0", "2026-10-14", "2026-10-17"),
@@ -563,7 +563,8 @@ fn rise_set() -> Result {
         ("Madison", "-89.4012,43.0731,0", "2150-12-20", "2150-12-23"),
     ];
     let mut out = String::from(
-        "# JPL Horizons' sunrises and sunsets (true visual horizon, refracted upper limb), UT,\n\
+        "# JPL Horizons' sunrises, sunsets and upper transits (true visual horizon, refracted upper\n\
+         # limb), UT,\n\
          # one-minute steps. Fetched by `cargo xtask fixtures`; don't edit.\n# site\tlon,lat\tevent\tUT\n",
     );
     for (name, coord, start, stop) in sites {
@@ -586,6 +587,7 @@ fn rise_set() -> Result {
             let event = match r.get(2).map(|f| f.trim()) {
                 Some("r") => "rise",
                 Some("s") => "set",
+                Some("t") => "transit",
                 _ => continue,
             };
             writeln!(

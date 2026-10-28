@@ -104,7 +104,7 @@ fn rise_set_against_horizons() {
     ];
     let mut worst = 0.0f64;
     let rows = data("horizons/rise-set.tsv");
-    for r in &rows {
+    for r in rows.iter().filter(|r| r[2] != "transit") {
         let (lon, lat) = r[1].split_once(',').unwrap();
         let (lon, lat): (f64, f64) = (lon.parse().unwrap(), lat.parse().unwrap());
         // "2026-Oct-15 12:12:00"
@@ -150,7 +150,7 @@ fn rise_set_against_horizons() {
     }
     println!(
         "rise and set: within {worst:.1} s of the start of Horizons' minute ({} events)",
-        rows.len()
+        rows.iter().filter(|r| r[2] != "transit").count()
     );
 
     // As many crossings as Horizons finds in each window, polar days and nights included.
@@ -189,7 +189,9 @@ fn rise_set_against_horizons() {
         let month = &months[m0 as usize - 1];
         let want = rows
             .iter()
-            .filter(|r| r[0] == name && r[3].starts_with(&format!("{y0}-{month}")))
+            .filter(|r| {
+                r[0] == name && r[2] != "transit" && r[3].starts_with(&format!("{y0}-{month}"))
+            })
             .count();
         let got = sun_crossings(
             &Builtin,
@@ -202,6 +204,97 @@ fn rise_set_against_horizons() {
         .unwrap()
         .len();
         assert_eq!(got, want, "{name} {y0}-{m0}-{d0}");
+    }
+}
+
+/// Horizons' time `r` ("2026-Oct-15 12:12:00") as a Julian date, UT.
+fn horizons_time(r: &str) -> f64 {
+    use astrometry::time::julian_date;
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (date, clock) = r.split_once(' ').unwrap();
+    let d: Vec<&str> = date.split('-').collect();
+    let m = months.iter().position(|x| *x == d[1]).unwrap() as u8 + 1;
+    let c: Vec<u8> = clock.split(':').map(|x| x.parse().unwrap()).collect();
+    julian_date(
+        d[0].parse().unwrap(),
+        m,
+        d[2].parse().unwrap(),
+        c[0],
+        c[1],
+        0.0,
+    )
+}
+
+/// The Sun's upper transits against Horizons, which gives them to the minute.
+#[test]
+fn upper_transits_against_horizons() {
+    use astrometry::horizon::sun_transits;
+    use astrometry::time::{DAY, civil_from_tt, tt_from_civil};
+    let mut worst = (f64::MAX, f64::MIN);
+    let rows = data("horizons/rise-set.tsv");
+    let rows: Vec<_> = rows.iter().filter(|r| r[2] == "transit").collect();
+    assert!(rows.len() > 20, "{} transits", rows.len());
+    for r in &rows {
+        let (lon, _) = r[1].split_once(',').unwrap();
+        let lon: f64 = lon.parse().unwrap();
+        let want = horizons_time(&r[3]);
+        let tt = tt_from_civil(want);
+        let found = sun_transits(&Builtin, tt - 0.25, tt + 0.25, lon.to_radians()).unwrap();
+        let near = found
+            .iter()
+            .filter(|x| x.upper)
+            .min_by(|a, b| (a.tt - tt).abs().total_cmp(&(b.tt - tt).abs()));
+        let off = (civil_from_tt(near.expect("a transit").tt) - want) * DAY;
+        // Horizons gives the first minute after the transit; ours falls in the minute before.
+        assert!(
+            (-61.0..1.0).contains(&off),
+            "{} {}: {off:+.1} s",
+            r[0],
+            r[3]
+        );
+        worst = (worst.0.min(off), worst.1.max(off));
+    }
+    println!(
+        "upper transits: {:+.1} to {:+.1} s from the start of Horizons' minute ({} events)",
+        worst.0,
+        worst.1,
+        rows.len()
+    );
+}
+
+/// At a lower transit the hour angle is π, to well under a second of time, and it falls about
+/// midway between the upper ones.
+#[test]
+fn lower_transits() {
+    use astrometry::horizon::{hour_angle, sun_transits};
+    use astrometry::time::{DAY, julian_date, tt_from_civil};
+    let from = tt_from_civil(julian_date(2026, 10, 14, 0, 0, 0.0));
+    for lon in [-89.4012f64, 18.96, 139.69, -157.86] {
+        let east = lon.to_radians();
+        let all = sun_transits(&Builtin, from, from + 6.0, east).unwrap();
+        assert!(all.windows(2).all(|w| w[0].upper != w[1].upper), "{all:?}");
+        let lower: Vec<_> = all.iter().filter(|x| !x.upper).collect();
+        assert!(lower.len() >= 5, "{lon}: {all:?}");
+        for x in &lower {
+            let h = hour_angle(&Builtin, Body::Sun, x.tt, east).unwrap();
+            // The Earth turns 2π a day: a second of time is 7.3e-5 rad.
+            let off = (h.abs() - std::f64::consts::PI) * DAY / std::f64::consts::TAU;
+            assert!(off.abs() < 0.5, "{lon}: {off:.3} s");
+        }
+        let upper: Vec<_> = all.iter().filter(|x| x.upper).collect();
+        for l in &lower {
+            let (Some(a), Some(b)) = (
+                upper.iter().rev().find(|u| u.tt < l.tt),
+                upper.iter().find(|u| u.tt > l.tt),
+            ) else {
+                continue;
+            };
+            // The equation of time moves the transits by a few seconds a day.
+            let off = (l.tt - (a.tt + b.tt) / 2.0) * DAY;
+            assert!(off.abs() < 30.0, "{lon}: {off:.1} s from the midpoint");
+        }
     }
 }
 
