@@ -3,7 +3,7 @@
 //! `serde` feature, the JSON shape of what they cache. A failure here is a change they must be
 //! told of before it's tagged, not a test to update quietly.
 
-use horae::{Dignity, Direction, Element, Kind, Phase, Planet, Point, Sign, Solar};
+use horae::{Dignity, Direction, Element, Kind, Phase, Planet, Point, Resh, Sign, Solar, Tattva};
 
 /// Each member as "name symbol abbreviation", in order, `-` where there's none.
 fn rows<T: Copy>(all: &[T], f: impl Fn(T) -> [&'static str; 3]) -> Vec<String> {
@@ -12,7 +12,7 @@ fn rows<T: Copy>(all: &[T], f: impl Fn(T) -> [&'static str; 3]) -> Vec<String> {
 
 #[test]
 fn enums_in_order() {
-    let tests: [(&str, Vec<String>, &[&str]); 9] = [
+    let tests: [(&str, Vec<String>, &[&str]); 11] = [
         (
             "Planet",
             rows(&Planet::ALL, |p| [p.name(), p.symbol(), p.abbreviation()]),
@@ -111,6 +111,23 @@ fn enums_in_order() {
             rows(&Direction::ALL, |d| [d.name(), "-", "-"]),
             &["Direct - -", "Retrograde - -"],
         ),
+        (
+            "Resh",
+            rows(&Resh::ALL, |r| [r.name(), "-", "-"]),
+            &["Dawn - -", "Noon - -", "Sunset - -", "Midnight - -"],
+        ),
+        (
+            // The tides' order.
+            "Tattva",
+            rows(&Tattva::ALL, |t| [t.name(), "-", "-"]),
+            &[
+                "Spirit - -",
+                "Air - -",
+                "Fire - -",
+                "Water - -",
+                "Earth - -",
+            ],
+        ),
     ];
     for (name, got, want) in tests {
         assert_eq!(got, want, "{name}'s members");
@@ -132,7 +149,8 @@ mod json {
     use std::collections::BTreeSet;
     use std::fmt::Write as _;
 
-    use horae::{Builtin, Sky, angles, hours, moon, stations};
+    use horae::{Builtin, Sky, angles, hours, moon, resh, stations};
+    use jiff::SignedDuration;
     use jiff::civil::date;
     use jiff::tz::TimeZone;
     use serde_json::Value;
@@ -194,6 +212,26 @@ mod json {
         let parts = [
             parts.as_slice(),
             &[("polar", serde_json::to_value(&polar).unwrap())],
+        ]
+        .concat();
+        // The Resh times of a day, and a tide.
+        let day = hours::day(&Builtin, &t, lat, lon).unwrap();
+        let times = resh::times(
+            &Builtin,
+            &t,
+            &(&t + SignedDuration::from_hours(24)),
+            lat,
+            lon,
+        )
+        .unwrap();
+        assert_eq!(times.len(), 4, "{times:?}");
+        let tide = resh::tide_at(&day, t.timestamp()).expect("a tide at 13:14");
+        let parts = [
+            parts.as_slice(),
+            &[
+                ("resh", serde_json::to_value(&times).unwrap()),
+                ("tide", serde_json::to_value(&tide).unwrap()),
+            ],
         ]
         .concat();
         let mut got = BTreeSet::new();

@@ -4,8 +4,9 @@ Traditional astrology of a moment at a place, on the [astrometry](..) ephemeris:
 planets and the lunar nodes (true) in the tropical zodiac, their dignities and closeness to
 the Sun, the Ptolemaic aspects with William Lilly's orbs, applying or separating; the Moon's
 phase, lunations and course to the end of its sign (void of course); the planets' stations;
-the Ascendant and Midheaven; and the planetary days and hours, with the polar days that have
-none.
+the Ascendant and Midheaven; the planetary days and hours, with the polar days that have
+none; and the Resh times (dawn, noon, sunset and midnight, the Sun's transits) and the
+elemental tides that divide the planetary day.
 
 ```rust
 use astrometry::source::Builtin;

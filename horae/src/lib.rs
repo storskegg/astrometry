@@ -1,7 +1,7 @@
 //! Traditional astrology of a moment at a place, on the `astrometry` ephemeris: the seven
 //! planets and the lunar nodes in the tropical zodiac, their dignities, their closeness to the
-//! Sun and their aspects, the Moon's phase, lunations and course, and the planetary days and
-//! hours.
+//! Sun and their aspects, the Moon's phase, lunations and course, the planetary days and
+//! hours, and the Resh times and elemental tides.
 //!
 //! Positions are apparent geocentric ecliptic longitudes of date, from JPL's DE440, built in
 //! for 1800–2200. The nodes are the true (osculating) nodes.
@@ -87,6 +87,7 @@ pub mod hours;
 pub mod moon;
 mod names;
 pub mod position;
+pub mod resh;
 mod sky;
 pub mod stations;
 pub mod time;
@@ -101,6 +102,7 @@ pub use conditions::{Dignity, Solar, dignities, solar};
 pub use hours::{Day, Hour, PlanetaryDay, Polar, day};
 pub use moon::Phase;
 pub use position::Position;
+pub use resh::{Resh, ReshTime, Tattva, Tide};
 pub use sky::{Body, Moon, Sky};
 pub use stations::{Direction, Station};
 pub use zodiac::{Element, Planet, Point, Sign};

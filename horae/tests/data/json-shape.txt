@@ -6,6 +6,8 @@ course.aspects[].planet: string
 course.leaves_sign: string
 polar.Polar.polar: string
 polar.Polar.ruler: string
+resh[].at: string
+resh[].resh: string
 sky.aspects[].applying: bool
 sky.aspects[].kind: string
 sky.aspects[].orb: number
@@ -44,3 +46,9 @@ station.at: string
 station.longitude: number
 station.planet: string
 station.turns: string
+tide.end: string
+tide.night: bool
+tide.number: number
+tide.part: number
+tide.start: string
+tide.tattva: string
