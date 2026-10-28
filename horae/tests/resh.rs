@@ -83,11 +83,9 @@ fn a_day_of_resh_times() {
         kinds,
         [Resh::Dawn, Resh::Noon, Resh::Sunset, Resh::Midnight]
     );
-    // Found over another window, so the bisection can fall a second either side.
-    let near =
-        |a: &Zoned, b: &Zoned| (a.timestamp().as_second() - b.timestamp().as_second()).abs() <= 1;
-    assert!(near(&found[0].at, &day.sunrise), "{}", found[0].at);
-    assert!(near(&found[2].at, &day.sunset), "{}", found[2].at);
+    // Found over another window, and the same to the second.
+    assert_eq!(found[0].at, day.sunrise);
+    assert_eq!(found[2].at, day.sunset);
     // Noon between sunrise and sunset, Midnight between sunset and the next sunrise.
     assert!(day.sunrise < found[1].at && found[1].at < day.sunset);
     assert!(day.sunset < found[3].at && found[3].at < day.next_sunrise);
