@@ -10,7 +10,7 @@ use crate::time::{centuries, tdb_minus_tt};
 use crate::vector::{cross, sub};
 
 /// The step of the symmetric differences, days.
-const STEP: f64 = 0.01;
+pub const STEP: f64 = 0.01;
 
 /// The signed difference `a − b` of two longitudes, degrees, in −180..180.
 pub fn diff(a: f64, b: f64) -> f64 {
