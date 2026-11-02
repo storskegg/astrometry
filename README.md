@@ -56,7 +56,16 @@ horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.6.0" }
 ```
 
 The two are versioned together and tagged once: take both at the same tag, or Cargo sees two
-astrometries. The `embedded` feature, on by default, compiles the DE440 slice in; with
+astrometries.
+
+From 2026-11-09 the versions are calendar versions, `YYYY.WW.PATCH`: the ISO 8601 week-year
+and week (Monday to Sunday) of the release, and its count within that week from 0, without
+zero-padding: `2026.46.0`, `2026.46.1`, then `2026.47.0`, and `2027.1.0` in January. Tags are
+`v` and the version. The last semantic version was 1.6.0. A number says when, not what changed,
+and Cargo would take any two in a year for compatible, so pin an exact tag and read the release
+notes, which are the tagging commit's message. Breaking changes are avoided; when one is needed,
+the old item is deprecated first, naming its replacement, and removed no sooner than four weeks
+later, in a release whose notes say "Breaking:". The `embedded` feature, on by default, compiles the DE440 slice in; with
 `default-features = false` on both, `astrometry::slice::install(&bytes)` takes
 `data/de440-1800-2200.bin` at run time instead (a browser's build, say), and without `theories`, also on by default, dates beyond 1800–2200
 are errors, not VSOP87E and ELP/MPP02's. The `serde` feature
