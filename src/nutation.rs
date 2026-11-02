@@ -2,6 +2,7 @@
 //! Conventions (2010) tables 5.3a and 5.3b, with the fundamental arguments of the IERS
 //! Conventions (2003).
 
+use std::cell::Cell;
 use std::sync::LazyLock;
 
 use crate::time::centuries;
@@ -120,11 +121,31 @@ fn sum(terms: &[Term], args: &[f64; 14], t: f64) -> f64 {
         * ARCSEC
 }
 
-/// Nutation in longitude and in obliquity, radians, at TT Julian date `jd`.
-pub fn nutation(jd: f64) -> (f64, f64) {
+/// Nutation in longitude and in obliquity, radians, at TT Julian date `jd`, summed afresh.
+fn compute(jd: f64) -> (f64, f64) {
     let t = centuries(jd);
     let args = arguments(t);
     (sum(&LONGITUDE, &args, t), sum(&OBLIQUITY, &args, t))
+}
+
+thread_local! {
+    /// The last date asked for (its bits) and its nutation: a position, the sidereal time and
+    /// the horizon all ask for the same moment's.
+    static LAST: Cell<Option<(u64, (f64, f64))>> = const { Cell::new(None) };
+}
+
+/// Nutation in longitude and in obliquity, radians, at TT Julian date `jd`. The last date's
+/// result is kept, so the same moment asked again isn't summed again.
+pub fn nutation(jd: f64) -> (f64, f64) {
+    let key = jd.to_bits();
+    if let Some((k, v)) = LAST.with(Cell::get)
+        && k == key
+    {
+        return v;
+    }
+    let v = compute(jd);
+    LAST.with(|c| c.set(Some((key, v))));
+    v
 }
 
 #[cfg(test)]
@@ -143,6 +164,26 @@ mod tests {
             (-17206424.18, 3338.60)
         );
         assert_eq!((OBLIQUITY[0].sin, OBLIQUITY[0].cos), (1537.70, 9205233.10));
+    }
+
+    // A kept result is the one summed afresh, bit for bit, however the dates alternate.
+    #[test]
+    fn memo_is_exact() {
+        let dates = [
+            2461328.25,
+            2400000.5 + 53736.0,
+            2461328.25,
+            2500000.0,
+            2461328.25,
+        ];
+        for jd in dates.into_iter().chain(dates) {
+            let fresh = compute(jd);
+            for _ in 0..2 {
+                let (dpsi, deps) = nutation(jd);
+                assert_eq!(dpsi.to_bits(), fresh.0.to_bits(), "{jd}");
+                assert_eq!(deps.to_bits(), fresh.1.to_bits(), "{jd}");
+            }
+        }
     }
 
     // SOFA's iauNut06a test value: at 2400000.5 + 53736.0, Δψ = -0.9630912025820308797e-5 rad,

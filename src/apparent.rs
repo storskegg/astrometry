@@ -48,8 +48,9 @@ fn aberrate(p: Vec3, v: Vec3, s: f64) -> Vec3 {
     unit([0, 1, 2].map(|i| p[i] * bm1 + w1 * v[i] + w2 * (v[i] - pdv * p[i])))
 }
 
-/// The apparent geocentric position of `body` at TT Julian date `tt`.
-pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::Error> {
+/// The apparent direction of `body` in GCRS axes (a unit vector) and its light-time distance,
+/// au, at TT Julian date `tt`.
+pub(crate) fn direction(src: &dyn Source, body: Body, tt: f64) -> Result<(Vec3, f64), spk::Error> {
     // TDB, and the light time, as seconds from `tt`, not added to it (see
     // `Source::state_after`).
     let tdb_tt = tdb_minus_tt(tt);
@@ -74,7 +75,12 @@ pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::
         p = deflect(p, q, unit(e), norm(e));
     }
     p = aberrate(p, scale(1.0 / C, earth_v), norm(sub(earth, sun)));
+    Ok((p, distance))
+}
 
+/// The apparent geocentric position of `body` at TT Julian date `tt`.
+pub fn apparent(src: &dyn Source, body: Body, tt: f64) -> Result<Apparent, spk::Error> {
+    let (p, distance) = direction(src, body, tt)?;
     let ecl = precession::gcrs_to_ecliptic_of_date(tt).apply(p);
     let longitude = ecl[1].atan2(ecl[0]).to_degrees().rem_euclid(360.0);
     let latitude = ecl[2].clamp(-1.0, 1.0).asin().to_degrees();

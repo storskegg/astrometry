@@ -1,6 +1,6 @@
 //! The Sun against a place's horizon: its altitude, and when it crosses an altitude.
 
-use crate::apparent::apparent;
+use crate::apparent::direction;
 use crate::precession::gcrs_to_true_equator;
 use crate::sidereal::gast;
 use crate::source::{Body, Source};
@@ -11,15 +11,15 @@ use crate::time::ut1_from_tt;
 /// horizon, allowing for refraction (−0°50′), as the Go version has it.
 pub const SUNRISE: f64 = -50.0 / 60.0 * std::f64::consts::PI / 180.0;
 
-/// The Sun's local apparent hour angle (wrapped to (−π, π]) and declination, radians, from one
-/// call of `apparent`.
+/// The Sun's local apparent hour angle (wrapped to (−π, π]) and declination, radians, from the
+/// apparent direction alone.
 fn hour_angle_and_declination(
     src: &dyn Source,
     body: Body,
     tt: f64,
     east: f64,
 ) -> Result<(f64, f64), spk::Error> {
-    let p = gcrs_to_true_equator(tt).apply(apparent(src, body, tt)?.direction);
+    let p = gcrs_to_true_equator(tt).apply(direction(src, body, tt)?.0);
     let (ra, dec) = (p[1].atan2(p[0]), p[2].clamp(-1.0, 1.0).asin());
     let h = gast(ut1_from_tt(tt), tt) + east - ra;
     Ok((h.sin().atan2(h.cos()), dec))
