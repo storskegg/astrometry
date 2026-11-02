@@ -17,7 +17,8 @@ tasks:
                  or target/jpl/de440.bsp)
   version [DATE] [--write]
                  print the next calendar version YYYY.WW.PATCH for DATE (YYYY-MM-DD, default
-                 today in UTC); --write sets it in the manifests, README and Cargo.lock
+                 today in UTC); --write sets it in the manifests, README and Cargo.lock.
+                 It counts the week's local tags: `git fetch --tags` first
 ";
 
 type Result<T = ()> = std::result::Result<T, String>;
