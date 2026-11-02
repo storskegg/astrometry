@@ -35,32 +35,45 @@ pub fn run() -> Result {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| root().join("target/jpl/de440.bsp"));
     let spk = Spk::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut head = Vec::new();
-    let mut body = Vec::new();
-    head.extend(b"ASTRDE01");
-    head.extend((SEGMENTS.len() as u32).to_le_bytes());
+    // Per segment: its head, then the deflated blocks of about a year's records each.
+    let mut heads = Vec::new();
+    let mut tables: Vec<Vec<(u64, u32)>> = Vec::new();
+    let mut blocks: Vec<Vec<u8>> = Vec::new();
+    let mut total = 0;
     for (target, center, step) in SEGMENTS {
         let r = spk
             .records(target, center, FROM, TO)
             .map_err(|e| e.to_string())?;
-        let mut stream = Vec::new();
+        let per_block = (365.25 * 86400.0 / r.interval).ceil() as usize;
         let mut worst = 0.0f64;
-        for rec in &r.records {
-            for &c in rec {
-                let q = (c / step).round() as i64;
-                worst = worst.max((q as f64 * step - c).abs());
-                let mut v = ((q << 1) ^ (q >> 63)) as u64;
-                loop {
-                    let byte = (v & 0x7f) as u8;
-                    v >>= 7;
-                    if v == 0 {
-                        stream.push(byte);
-                        break;
+        let mut table = Vec::new();
+        let mut bytes = 0;
+        for chunk in r.records.chunks(per_block) {
+            let mut stream = Vec::new();
+            for rec in chunk {
+                for &c in rec {
+                    let q = (c / step).round() as i64;
+                    worst = worst.max((q as f64 * step - c).abs());
+                    let mut v = ((q << 1) ^ (q >> 63)) as u64;
+                    loop {
+                        let byte = (v & 0x7f) as u8;
+                        v >>= 7;
+                        if v == 0 {
+                            stream.push(byte);
+                            break;
+                        }
+                        stream.push(byte | 0x80);
                     }
-                    stream.push(byte | 0x80);
                 }
             }
+            bytes += stream.len();
+            let mut enc = DeflateEncoder::new(Vec::new(), Compression::best());
+            enc.write_all(&stream).map_err(|e| e.to_string())?;
+            let block = enc.finish().map_err(|e| e.to_string())?;
+            table.push((0, block.len() as u32));
+            blocks.push(block);
         }
+        let mut head = Vec::new();
         head.extend(target.to_le_bytes());
         head.extend(center.to_le_bytes());
         head.extend(r.init.to_le_bytes());
@@ -68,27 +81,47 @@ pub fn run() -> Result {
         head.extend((r.n as u32).to_le_bytes());
         head.extend((r.records.len() as u32).to_le_bytes());
         head.extend(step.to_le_bytes());
-        head.extend((stream.len() as u64).to_le_bytes());
+        head.extend((per_block as u32).to_le_bytes());
+        head.extend((table.len() as u32).to_le_bytes());
         println!(
-            "{target:>3}/{center}: {} records of {} coefficients, {:.1} days each; {} bytes; worst rounding {worst:.2e} km",
+            "{target:>3}/{center}: {} records of {} coefficients, {:.1} days each, {} to a block ({} blocks); {bytes} bytes; worst rounding {worst:.2e} km",
             r.records.len(),
             r.n,
             r.interval / 86400.0,
-            stream.len()
+            per_block,
+            table.len(),
         );
-        body.extend(stream);
+        total += table.len();
+        heads.push(head);
+        tables.push(table);
     }
-    head.extend(body);
-    let mut enc = DeflateEncoder::new(Vec::new(), Compression::best());
-    enc.write_all(&head).map_err(|e| e.to_string())?;
-    let out = enc.finish().map_err(|e| e.to_string())?;
+    // The blocks follow the heads and tables; now their offsets are known.
+    let mut at = (8 + 4 + heads.iter().map(Vec::len).sum::<usize>() + total * 12) as u64;
+    for table in &mut tables {
+        for (offset, len) in table.iter_mut() {
+            *offset = at;
+            at += u64::from(*len);
+        }
+    }
+    let mut out = Vec::new();
+    out.extend(b"ASTRDE02");
+    out.extend((SEGMENTS.len() as u32).to_le_bytes());
+    for (head, table) in heads.iter().zip(&tables) {
+        out.extend(head);
+        for &(offset, len) in table {
+            out.extend(offset.to_le_bytes());
+            out.extend(len.to_le_bytes());
+        }
+    }
+    for block in &blocks {
+        out.extend(block);
+    }
     let file = root().join("data/de440-1800-2200.bin");
     std::fs::write(&file, &out).map_err(|e| e.to_string())?;
     println!(
-        "wrote {} ({} bytes, {} before deflating)",
+        "wrote {} ({} bytes in {total} blocks)",
         file.strip_prefix(root()).unwrap().display(),
         out.len(),
-        head.len()
     );
     Ok(())
 }
