@@ -44,46 +44,42 @@ pub fn altitude(
     Ok((lat.sin() * dec.sin() + lat.cos() * dec.cos() * h.cos()).asin())
 }
 
-/// The times between `from` and `to` at which `f` changes sign, each with whether it rose
-/// through zero. `f` is sampled every ten minutes on a fixed grid, whole multiples of the step
-/// from JD 0, and each change narrowed by bisection to under a second; so an event is bracketed
-/// and bisected the same whatever the window it's found in.
-fn sign_changes(
-    from: f64,
-    to: f64,
+/// The zero of `f` between `a` and `b`, where `fa` and `fb` (its values there) differ in sign,
+/// by regula falsi with the Illinois modification, until a step is under half a second.
+fn illinois(
     f: impl Fn(f64) -> Result<f64, spk::Error>,
-) -> Result<Vec<(f64, bool)>, spk::Error> {
-    const STEP: f64 = 10.0 / 1440.0;
-    let first = (from / STEP).floor();
-    let at = |k: f64| k * STEP;
-    let mut out = Vec::new();
-    let (mut prev_t, mut prev) = (at(first), f(at(first))?);
-    let mut k = first + 1.0;
-    loop {
-        let t = at(k);
-        let cur = f(t)?;
-        if (prev < 0.0) != (cur < 0.0) {
-            let (mut lo, mut hi) = (prev_t, t);
-            while hi - lo > 0.5 / 86400.0 {
-                let mid = (lo + hi) / 2.0;
-                if (f(mid)? < 0.0) == (prev < 0.0) {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            let found = (lo + hi) / 2.0;
-            if (from..=to).contains(&found) {
-                out.push((found, prev < 0.0));
-            }
-        }
-        if t > to {
+    (mut a, mut fa): (f64, f64),
+    (mut b, mut fb): (f64, f64),
+) -> Result<f64, spk::Error> {
+    // Which end the last estimate replaced: -1 for `a`, 1 for `b`.
+    let mut side = 0;
+    let mut last = f64::NAN;
+    let mut c = (a + b) / 2.0;
+    for _ in 0..60 {
+        c = (fa * b - fb * a) / (fa - fb);
+        if (c - last).abs() < 0.5 / DAY {
             break;
         }
-        (prev_t, prev) = (t, cur);
-        k += 1.0;
+        last = c;
+        let fc = f(c)?;
+        if fc == 0.0 {
+            break;
+        }
+        if (fc < 0.0) == (fb < 0.0) {
+            (b, fb) = (c, fc);
+            if side == 1 {
+                fa /= 2.0;
+            }
+            side = 1;
+        } else {
+            (a, fa) = (c, fc);
+            if side == -1 {
+                fb /= 2.0;
+            }
+            side = -1;
+        }
     }
-    Ok(out)
+    Ok(c)
 }
 
 /// A crossing of an altitude.
@@ -95,10 +91,11 @@ pub struct Crossing {
     pub rising: bool,
 }
 
-/// The Sun's crossings of `altitude` between TT Julian dates `from` and `to`: its altitude
-/// sampled every ten minutes on a fixed grid, each crossing narrowed by bisection to under a
-/// second, as the Go version finds sunrise and sunset. A crossing is the same whichever window
-/// finds it.
+/// The Sun's crossings of `altitude` between TT Julian dates `from` and `to`. The Sun's altitude
+/// is least at the lower transit and greatest at the upper, so a crossing lies between two
+/// transits where the altitude changes sides of `altitude`, and is narrowed there by regula
+/// falsi to under a second. The transits fix the brackets, so a crossing is the same whichever
+/// window finds it.
 pub fn sun_crossings(
     src: &dyn Source,
     from: f64,
@@ -107,13 +104,27 @@ pub fn sun_crossings(
     east: f64,
     altitude_: f64,
 ) -> Result<Vec<Crossing>, spk::Error> {
-    let found = sign_changes(from, to, |tt| {
-        Ok(altitude(src, Body::Sun, tt, lat, east)? - altitude_)
-    })?;
-    Ok(found
-        .into_iter()
-        .map(|(tt, rising)| Crossing { tt, rising })
-        .collect())
+    let f = |tt: f64| Ok(altitude(src, Body::Sun, tt, lat, east)? - altitude_);
+    // Wide enough that every bracket of a crossing in the window has both its transits.
+    let transits = sun_transits(src, from - 1.0, to + 1.0, east)?;
+    let mut out = Vec::new();
+    let mut prev: Option<(f64, f64)> = None;
+    for x in transits {
+        let cur = (x.tt, f(x.tt)?);
+        if let Some(p) = prev
+            && (p.1 < 0.0) != (cur.1 < 0.0)
+        {
+            let tt = illinois(f, p, cur)?;
+            if (from..=to).contains(&tt) {
+                out.push(Crossing {
+                    tt,
+                    rising: p.1 < 0.0,
+                });
+            }
+        }
+        prev = Some(cur);
+    }
+    Ok(out)
 }
 
 /// A transit of the meridian.
