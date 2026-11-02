@@ -3,7 +3,7 @@
 use std::fmt;
 
 use astrometry::apparent::apparent;
-use astrometry::derived::{self, true_node, true_node_speed};
+use astrometry::derived::{self, STEP, diff, true_node, true_node_speed};
 use astrometry::source::{self, Source};
 
 use crate::EphemerisError;
@@ -52,6 +52,10 @@ impl Position {
             longitude: 0.0,
             speed: 0.0,
         }; 9];
+        // Each moment's planets together, so each moment's nutation is summed once.
+        let now = longitudes(src, tt)?;
+        let before = longitudes(src, tt - STEP)?;
+        let after = longitudes(src, tt + STEP)?;
         for p in Point::ALL {
             // The South Node is the North's, turned about.
             out[p.index()] = if p == Point::SouthNode {
@@ -60,6 +64,13 @@ impl Position {
                     point: p,
                     longitude: (n.longitude + 180.0) % 360.0,
                     speed: n.speed,
+                }
+            } else if let Some(planet) = p.planet() {
+                let i = planet.index();
+                Position {
+                    point: p,
+                    longitude: now[i],
+                    speed: diff(after[i], before[i]) / (2.0 * STEP),
                 }
             } else {
                 Position::at(src, p, tt)?
@@ -129,6 +140,21 @@ pub(crate) fn longitudes(src: &dyn Source, tt: f64) -> Result<[f64; 7], Ephemeri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astrometry::source::Builtin;
+
+    // `all` gathers the moments but gives `at`'s numbers, bit for bit.
+    #[test]
+    fn all_equals_at() {
+        for tt in [2461328.25, 2451545.0, 2470000.123, 2440000.5] {
+            let all = Position::all(&Builtin, tt).unwrap();
+            for p in Point::ALL {
+                let one = Position::at(&Builtin, p, tt).unwrap();
+                let two = all[p.index()];
+                assert_eq!(one.longitude.to_bits(), two.longitude.to_bits(), "{p:?}");
+                assert_eq!(one.speed.to_bits(), two.speed.to_bits(), "{p:?}");
+            }
+        }
+    }
 
     #[test]
     fn display() {
