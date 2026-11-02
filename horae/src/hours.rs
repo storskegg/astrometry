@@ -11,6 +11,7 @@ use jiff::civil::Weekday;
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, Zoned};
 
+use crate::resh;
 use crate::zodiac::Planet;
 use crate::{Error, check_coordinates, time};
 
@@ -104,6 +105,21 @@ impl PlanetaryDay {
     /// The hour holding `t`, if the day does.
     pub fn hour_at(&self, t: Timestamp) -> Option<&Hour> {
         self.hours.iter().find(|h| h.contains(t))
+    }
+
+    /// The first boundary strictly after `t` of the day's hours or of its tides
+    /// ([`resh::tides`](crate::resh::tides)), the last being the next sunrise: when the hour or the
+    /// tide next gives way. `None` before sunrise and from the next sunrise on. The Resh times
+    /// aren't counted; they come from [`resh::times_of`](crate::resh::times_of).
+    pub fn next_change(&self, t: Timestamp) -> Option<Timestamp> {
+        let n = self.hours.iter().position(|h| h.contains(t))?;
+        // The tides of the part holding the hour, and the hour's own end.
+        let tides = resh::part_bounds(self, n / 2).into_iter();
+        tides
+            .map(|z| z.timestamp())
+            .chain([self.hours[n].end.timestamp()])
+            .filter(|b| *b > t)
+            .min()
     }
 
     /// The day after: from the next sunrise.

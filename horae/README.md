@@ -6,7 +6,9 @@ the Sun, the Ptolemaic aspects with William Lilly's orbs, applying or separating
 phase, lunations and course to the end of its sign (void of course); the planets' stations;
 the Ascendant and Midheaven; the planetary days and hours, with the polar days that have
 none; and the Resh times (dawn, noon, sunset and midnight, the Sun's transits) and the
-elemental tides that divide the planetary day.
+elemental tides that divide the planetary day. `resh::times_of` gives a planetary day's four
+Resh times from its sunrise and sunset, and `PlanetaryDay::next_change` the next moment its hour
+or its tide gives way.
 
 ```rust
 use astrometry::source::Builtin;

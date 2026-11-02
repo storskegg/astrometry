@@ -187,3 +187,89 @@ fn serializes() {
     let back: horae::Tide = serde_json::from_value(v).unwrap();
     assert_eq!(back, tide);
 }
+
+const HONOLULU: (f64, f64) = (21.31, -157.86);
+
+// The day's four times, from its own sunrise and sunset and the transits only, equal those
+// found over its span.
+#[test]
+fn times_of_a_day_equal_the_times_over_it() {
+    let honolulu = TimeZone::get("Pacific/Honolulu").unwrap();
+    let oslo = TimeZone::get("Europe/Oslo").unwrap();
+    let places = [
+        (MADISON, at(2026, 10, 15, 13, chicago())),
+        (MADISON, at(2026, 3, 8, 13, chicago())),
+        (HONOLULU, at(2026, 6, 21, 12, honolulu)),
+        (TROMSO, at(2026, 11, 2, 12, oslo)),
+    ];
+    for ((lat, lon), t) in places {
+        let day = hours::day(&Builtin, &t, lat, lon).unwrap();
+        let day = day.planetary().expect("a sunrise and a sunset");
+        let got = resh::times_of(&Builtin, day).unwrap();
+        let want = resh::times(&Builtin, &day.sunrise, &day.next_sunrise, lat, lon).unwrap();
+        assert_eq!(got, want, "{lat}, {lon}");
+        let kinds: Vec<Resh> = got.iter().map(|r| r.resh).collect();
+        assert_eq!(
+            kinds,
+            [Resh::Dawn, Resh::Noon, Resh::Sunset, Resh::Midnight]
+        );
+        assert_eq!(got[0].at, day.sunrise);
+        assert_eq!(got[2].at, day.sunset);
+    }
+}
+
+// Every boundary of the hours and of the tides, in order, from the planetary day itself.
+fn boundaries(day: &horae::PlanetaryDay) -> Vec<jiff::Timestamp> {
+    let mut all: Vec<jiff::Timestamp> = day
+        .hours
+        .iter()
+        .flat_map(|h| [h.start.timestamp(), h.end.timestamp()])
+        .chain(
+            resh::tides(day)
+                .iter()
+                .flat_map(|d| [d.start.timestamp(), d.end.timestamp()]),
+        )
+        .collect();
+    all.sort();
+    all.dedup();
+    all
+}
+
+#[test]
+fn next_change_is_the_next_hour_or_tide_boundary() {
+    let day = madison_day(&at(2026, 10, 15, 13, chicago()));
+    let day = day.planetary().unwrap();
+    let all = boundaries(day);
+    assert!(all.len() > 60);
+    let second = SignedDuration::from_secs(1);
+    for w in all.windows(2) {
+        // At a boundary, the next one and not itself.
+        assert_eq!(day.next_change(w[0]), Some(w[1]), "at {}", w[0]);
+        // Within, the nearer of the hour's end and the tide's.
+        if w[1].duration_since(w[0]) > SignedDuration::from_secs(2) {
+            assert_eq!(day.next_change(w[0] + second), Some(w[1]));
+            assert_eq!(day.next_change(w[1] - second), Some(w[1]));
+        }
+    }
+    assert_eq!(
+        day.next_change(*all.last().unwrap() - second),
+        Some(day.next_sunrise.timestamp())
+    );
+}
+
+#[test]
+fn next_change_stays_within_the_day() {
+    let day = madison_day(&at(2026, 10, 15, 13, chicago()));
+    let day = day.planetary().unwrap();
+    let second = SignedDuration::from_secs(1);
+    let (rise, next) = (day.sunrise.timestamp(), day.next_sunrise.timestamp());
+    assert_eq!(day.next_change(rise - second), None);
+    assert_eq!(day.next_change(next), None);
+    assert_eq!(day.next_change(next + second), None);
+    assert!(day.next_change(rise).is_some_and(|c| c > rise));
+    // The last change before the next sunrise is the next sunrise itself.
+    let last = day.hours[23].start.timestamp();
+    let tides = resh::tides(day);
+    let last_tide = tides[59].start.timestamp().max(last);
+    assert_eq!(day.next_change(last_tide), Some(next));
+}

@@ -8,7 +8,8 @@
 //!
 //! Each part can be had alone, at the cost of only what it needs ([`Position::at`],
 //! [`day`], [`moon::appearance`], [`moon::lunations`], [`moon::course`],
-//! [`stations::next_station`]), or all together in a [`Sky`].
+//! [`stations::next_station`], [`resh::times_of`], [`PlanetaryDay::next_change`]), or all
+//! together in a [`Sky`].
 //!
 //! Begun as the astrology of `geomancer`; Apache-2.0, beside astrometry in its repository. The
 //! stations, the angles and the Moon's light are astrometry's, named and zoned here.

@@ -82,35 +82,37 @@ fn rounded(ns: i128, tz: &TimeZone) -> Zoned {
 /// parts runs across two hours, so its ends are the hours' exactly; its five tides are equal to
 /// the nanosecond, their inner boundaries then rounded to the second.
 pub fn tides(day: &PlanetaryDay) -> Vec<Tide> {
-    let tz = day.sunrise.time_zone();
     let mut out = Vec::with_capacity(60);
     for part in 0..12 {
-        let (start, end) = (&day.hours[2 * part].start, &day.hours[2 * part + 1].end);
-        let (s, e) = (
-            start.timestamp().as_nanosecond(),
-            end.timestamp().as_nanosecond(),
-        );
-        let bound = |k: i128| match k {
-            0 => start.clone(),
-            5 => end.clone(),
-            _ => rounded(s + (e - s) * k / 5, tz),
-        };
-        let mut from = bound(0);
+        let bounds = part_bounds(day, part);
         for k in 0..5 {
-            let to = bound(k as i128 + 1);
             let number = (part % 6) as u8 * 5 + k + 1;
             out.push(Tide {
                 tattva: Tattva::ALL[k as usize],
                 part: (part % 6) as u8 + 1,
                 number,
                 night: part >= 6,
-                start: from,
-                end: to.clone(),
+                start: bounds[k as usize].clone(),
+                end: bounds[k as usize + 1].clone(),
             });
-            from = to;
         }
     }
     out
+}
+
+/// The six boundaries of the five tides of `part` (0–11) of the day.
+pub(crate) fn part_bounds(day: &PlanetaryDay, part: usize) -> [Zoned; 6] {
+    let tz = day.sunrise.time_zone();
+    let (start, end) = (&day.hours[2 * part].start, &day.hours[2 * part + 1].end);
+    let (s, e) = (
+        start.timestamp().as_nanosecond(),
+        end.timestamp().as_nanosecond(),
+    );
+    std::array::from_fn(|k| match k {
+        0 => start.clone(),
+        5 => end.clone(),
+        _ => rounded(s + (e - s) * k as i128 / 5, tz),
+    })
 }
 
 /// The tide holding `t`, if the day is planetary and holds it.
@@ -153,6 +155,49 @@ pub fn times(
     }
     out.retain(|r| from.timestamp() <= r.at.timestamp() && r.at.timestamp() < to.timestamp());
     out.sort_by_key(|r| r.at.timestamp());
+    Ok(out)
+}
+
+/// The four Resh times of a planetary day, in order: Dawn at its sunrise, Noon, Sunset, and
+/// Midnight before the next sunrise, in the sunrise's zone. Only the Sun's transits are found,
+/// for the day has its sunrise and sunset already.
+pub fn times_of(src: &dyn Source, day: &PlanetaryDay) -> Result<Vec<ReshTime>, Error> {
+    let tz = day.sunrise.time_zone();
+    let (rise, set, next) = (
+        day.sunrise.timestamp(),
+        day.sunset.timestamp(),
+        day.next_sunrise.timestamp(),
+    );
+    // A little beyond each end, for the rounding of the times to the second.
+    let (a, b) = (time::tt(rise) - 2.0 / DAY, time::tt(next) + 2.0 / DAY);
+    let east = day.longitude.to_radians();
+    let mut out = vec![ReshTime {
+        resh: Resh::Dawn,
+        at: day.sunrise.clone(),
+    }];
+    let mut noon = None;
+    let mut midnight = None;
+    for x in sun_transits(src, a, b, east)? {
+        let at = time::zoned(x.tt, tz);
+        let t = at.timestamp();
+        if x.upper && rise < t && t < set {
+            noon = Some(ReshTime {
+                resh: Resh::Noon,
+                at,
+            });
+        } else if !x.upper && set < t && t < next {
+            midnight = Some(ReshTime {
+                resh: Resh::Midnight,
+                at,
+            });
+        }
+    }
+    out.extend(noon);
+    out.push(ReshTime {
+        resh: Resh::Sunset,
+        at: day.sunset.clone(),
+    });
+    out.extend(midnight);
     Ok(out)
 }
 
