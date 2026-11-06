@@ -10,6 +10,12 @@ fn rows<T: Copy>(all: &[T], f: impl Fn(T) -> [&'static str; 3]) -> Vec<String> {
     all.iter().map(|&m| f(m).join(" ")).collect()
 }
 
+// Older caches hold the label in its former case; parsing ignores case.
+#[test]
+fn solar_old_label_parses() {
+    assert_eq!("Under the beams".parse::<Solar>(), Ok(Solar::UnderTheBeams));
+}
+
 #[test]
 fn enums_in_order() {
     let tests: [(&str, Vec<String>, &[&str]); 11] = [
@@ -104,7 +110,7 @@ fn enums_in_order() {
             // geomancy maps an Option<Solar> to its own enum at index + 1.
             "Solar",
             rows(&Solar::ALL, |s| [s.name(), "-", "-"]),
-            &["Cazimi - -", "Combust - -", "Under the beams - -"],
+            &["Cazimi - -", "Combust - -", "Under the Beams - -"],
         ),
         (
             "Direction",

@@ -78,8 +78,8 @@ pub enum Polar {
 impl fmt::Display for Polar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Polar::NoSunrise => "the Sun doesn't rise here on this date",
-            Polar::NoSunset => "the Sun doesn't set here on this date",
+            Polar::NoSunrise => "The Sun doesn't rise here today.",
+            Polar::NoSunset => "The Sun doesn't set here today.",
         })
     }
 }

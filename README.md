@@ -70,7 +70,7 @@ later, in a release whose notes say "Breaking:". The `embedded` feature, on by d
 `data/de440-1800-2200.bin` at run time instead (a browser's build, say), and without `theories`, also on by default, dates beyond 1800–2200
 are errors, not VSOP87E and ELP/MPP02's. The `serde` feature
 (of either) serializes their results; horae's names its
-members, as "North Node" and "Under the beams".
+members, as "North Node" and "Under the Beams".
 
 ## The tests and the data
 

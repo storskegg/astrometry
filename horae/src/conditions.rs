@@ -81,7 +81,7 @@ named_enum!(
         /// Within 8°30′: burnt up, weakened.
         Combust => "Combust",
         /// Within 17°: hidden, somewhat weakened.
-        UnderTheBeams => "Under the beams",
+        UnderTheBeams => "Under the Beams",
     ]
 );
 

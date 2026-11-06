@@ -266,6 +266,18 @@ fn polar() {
     }
 }
 
+#[test]
+fn polar_messages() {
+    assert_eq!(
+        Polar::NoSunrise.to_string(),
+        "The Sun doesn't rise here today."
+    );
+    assert_eq!(
+        Polar::NoSunset.to_string(),
+        "The Sun doesn't set here today."
+    );
+}
+
 // The lunations are the conjunction and opposition of the Sun and Moon, on either side of
 // the moment.
 #[test]
@@ -364,7 +376,7 @@ fn json_round_trip() {
     for want in [
         r#""point":"Venus""#,
         r#""dignities":["Detriment"]"#,
-        r#""solar":"Under the beams""#,
+        r#""solar":"Under the Beams""#,
         r#""phase":"Crescent""#,
     ] {
         assert!(b.contains(want), "JSON lacks {want}:\n{b}");
