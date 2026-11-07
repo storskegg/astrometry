@@ -270,11 +270,11 @@ fn polar() {
 fn polar_messages() {
     assert_eq!(
         Polar::NoSunrise.to_string(),
-        "The Sun doesn't rise here today."
+        "The Sun doesn't rise here on this day."
     );
     assert_eq!(
         Polar::NoSunset.to_string(),
-        "The Sun doesn't set here today."
+        "The Sun doesn't set here on this day."
     );
 }
 
