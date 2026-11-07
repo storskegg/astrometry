@@ -83,7 +83,7 @@ tests run too, against the full file.
   USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers.
 - `cargo xtask de440` cuts the built-in slice from `de440.bsp`.
 
-## Licence
+## License
 
 Apache-2.0 (see [LICENSE](LICENSE)). The data built in are under their own terms: see
 [NOTICE.md](NOTICE.md).
