@@ -45,6 +45,37 @@ pub fn mean_node(tt: f64) -> f64 {
     (omega + nutation(tt).0.to_degrees()).rem_euclid(360.0)
 }
 
+/// The mean inclination of the Moon's orbit to the ecliptic, degrees.
+const MEAN_INCLINATION: f64 = 5.1453964;
+
+/// The mean lunar apogee ("Black Moon Lilith"), from the true equinox, degrees: the apogee
+/// projected onto the ecliptic of date, as the Swiss Ephemeris gives it. The apogee on the orbit
+/// is Meeus's mean perigee (Astronomical Algorithms, eq. 47.7) plus 180°; its angle from the
+/// mean node is projected onto the ecliptic through [`MEAN_INCLINATION`], and the nutation in
+/// longitude is added.
+pub fn mean_apogee(tt: f64) -> f64 {
+    let t = centuries(tt);
+    let perigee = 83.3532465 + 4069.0137287 * t - 0.0103200 * t * t - t.powi(3) / 80053.0
+        + t.powi(4) / 18999000.0;
+    let omega = 125.0445479 - 1934.1362891 * t + 0.0020754 * t * t + t.powi(3) / 467441.0
+        - t.powi(4) / 60616000.0;
+    let u = (perigee + 180.0 - omega).to_radians();
+    let projected = (u.sin() * MEAN_INCLINATION.to_radians().cos())
+        .atan2(u.cos())
+        .to_degrees();
+    (omega + projected + nutation(tt).0.to_degrees()).rem_euclid(360.0)
+}
+
+/// The speed of the mean node, degrees per day (central differences over [`STEP`]).
+pub fn mean_node_speed(tt: f64) -> f64 {
+    diff(mean_node(tt + STEP), mean_node(tt - STEP)) / (2.0 * STEP)
+}
+
+/// The speed of the mean apogee, degrees per day (central differences over [`STEP`]).
+pub fn mean_apogee_speed(tt: f64) -> f64 {
+    diff(mean_apogee(tt + STEP), mean_apogee(tt - STEP)) / (2.0 * STEP)
+}
+
 /// The speed of the true node, degrees per day.
 pub fn true_node_speed(src: &dyn Source, tt: f64) -> Result<f64, spk::Error> {
     Ok(diff(true_node(src, tt + STEP)?, true_node(src, tt - STEP)?) / (2.0 * STEP))
