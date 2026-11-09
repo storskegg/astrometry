@@ -1,0 +1,150 @@
+//! House cusps: Whole Sign, Equal, Placidus and Koch.
+//!
+//! Inputs are radians, like [`from_ramc`]; every cusp is returned in degrees, 0–360 from
+//! 0° Aries, in an array where index 0 is the 1st house.
+//!
+//! Sources: R. W. Holden, *The Elements of House Division* (1977); for Koch, W. Koch and
+//! E. Schäck, *Häusertabellen des Geburtsortes* (1959); and the Swiss Ephemeris
+//! documentation's published description of the two systems.
+
+use crate::angles::from_ramc;
+use crate::nutation::nutation;
+use crate::precession::mean_obliquity;
+use crate::sidereal::gast;
+use crate::time::ut1_from_tt;
+
+/// The right ascension of the Midheaven (the apparent sidereal time plus the east longitude
+/// `lon`, degrees) and the true obliquity of the ecliptic at TT Julian date `tt`, radians.
+pub fn ramc_and_obliquity(tt: f64, lon: f64) -> (f64, f64) {
+    let obliquity = mean_obliquity(tt) + nutation(tt).1;
+    let ramc = gast(ut1_from_tt(tt), tt) + lon.to_radians();
+    (ramc, obliquity)
+}
+
+/// The latitude, degrees, from which Placidus and Koch are undefined: 90° − the obliquity.
+/// They exist only strictly inside it.
+pub fn polar_limit(obliquity: f64) -> f64 {
+    90.0 - obliquity.to_degrees()
+}
+
+fn norm(deg: f64) -> f64 {
+    deg.rem_euclid(360.0)
+}
+
+/// Equal houses: each cusp 30° after the last, from the Ascendant (degrees).
+pub fn equal(ascendant: f64) -> [f64; 12] {
+    std::array::from_fn(|i| norm(ascendant + 30.0 * i as f64))
+}
+
+/// Whole Sign houses: the 1st house is the sign of the Ascendant (degrees), and each cusp is
+/// 0° of a sign.
+pub fn whole_sign(ascendant: f64) -> [f64; 12] {
+    let first = (norm(ascendant) / 30.0).floor() * 30.0;
+    std::array::from_fn(|i| norm(first + 30.0 * i as f64))
+}
+
+/// The declination of the ecliptic point with right ascension `ra`, and its longitude's
+/// sine, radians.
+fn declination(ra: f64, obliquity: f64) -> f64 {
+    let lambda = ra.sin().atan2(ra.cos() * obliquity.cos());
+    (obliquity.sin() * lambda.sin()).asin()
+}
+
+/// One intermediate Placidus cusp, degrees. It lies where the right ascension is
+/// `ramc + base + sign·fraction·semi_arc`, the semi-arc being the diurnal one (`diurnal`)
+/// or the nocturnal one, of the cusp's own declination. `None` when the semi-arc doesn't
+/// exist or the iteration doesn't settle.
+fn placidus_cusp(
+    ramc: f64,
+    obliquity: f64,
+    lat: f64,
+    start: f64,
+    diurnal: bool,
+    fraction: f64,
+) -> Option<f64> {
+    let mut ra = ramc + start;
+    for _ in 0..50 {
+        let delta = declination(ra, obliquity);
+        let x = -lat.tan() * delta.tan();
+        if !(-1.0..=1.0).contains(&x) {
+            return None;
+        }
+        let day = x.acos();
+        let next = if diurnal {
+            ramc + fraction * day
+        } else {
+            ramc + std::f64::consts::PI - fraction * (std::f64::consts::PI - day)
+        };
+        let moved = (next - ra).abs();
+        ra = next;
+        if moved < 1e-10 {
+            let lambda = ra.sin().atan2(ra.cos() * obliquity.cos());
+            return Some(norm(lambda.to_degrees()));
+        }
+    }
+    None
+}
+
+/// Placidus houses (Holden 1977; the Swiss Ephemeris documentation's description): each
+/// cusp is the ecliptic degree that has travelled a third or two thirds of its own semi-arc
+/// from the meridian. `None` at or beyond the polar limit, or where the cusps don't exist.
+pub fn placidus(ramc: f64, obliquity: f64, lat: f64) -> Option<[f64; 12]> {
+    if lat.to_degrees().abs() >= polar_limit(obliquity) {
+        return None;
+    }
+    let angles = from_ramc(ramc, obliquity, lat);
+    let third = 1.0 / 3.0;
+    let c11 = placidus_cusp(ramc, obliquity, lat, 30f64.to_radians(), true, third)?;
+    let c12 = placidus_cusp(ramc, obliquity, lat, 60f64.to_radians(), true, 2.0 * third)?;
+    let c2 = placidus_cusp(ramc, obliquity, lat, 120f64.to_radians(), false, 2.0 * third)?;
+    let c3 = placidus_cusp(ramc, obliquity, lat, 150f64.to_radians(), false, third)?;
+    let (asc, mc) = (angles.ascendant, angles.midheaven);
+    Some([
+        asc,
+        c2,
+        c3,
+        norm(mc + 180.0),
+        norm(c11 + 180.0),
+        norm(c12 + 180.0),
+        norm(asc + 180.0),
+        norm(c2 + 180.0),
+        norm(c3 + 180.0),
+        mc,
+        c11,
+        c12,
+    ])
+}
+
+/// Koch houses, the birthplace system (Koch and Schäck 1959; Holden 1977): the Midheaven's
+/// diurnal semi-arc, 90° plus its ascensional difference, is divided in three, and each
+/// cusp is the Ascendant at the sidereal time that many thirds from the Ascendant's own.
+/// `None` at or beyond the polar limit.
+pub fn koch(ramc: f64, obliquity: f64, lat: f64) -> Option<[f64; 12]> {
+    if lat.to_degrees().abs() >= polar_limit(obliquity) {
+        return None;
+    }
+    let angles = from_ramc(ramc, obliquity, lat);
+    let mc = angles.midheaven.to_radians();
+    let delta = (obliquity.sin() * mc.sin()).asin();
+    let x = lat.tan() * delta.tan();
+    if !(-1.0..=1.0).contains(&x) {
+        return None;
+    }
+    let step = (std::f64::consts::FRAC_PI_2 + x.asin()) / 3.0;
+    let asc = |k: f64| from_ramc(ramc + k * step, obliquity, lat).ascendant;
+    let (c11, c12, c1, c2, c3) = (asc(-2.0), asc(-1.0), angles.ascendant, asc(1.0), asc(2.0));
+    Some([
+        c1,
+        c2,
+        c3,
+        norm(angles.midheaven + 180.0),
+        norm(c11 + 180.0),
+        norm(c12 + 180.0),
+        norm(c1 + 180.0),
+        norm(c2 + 180.0),
+        norm(c3 + 180.0),
+        angles.midheaven,
+        c11,
+        c12,
+    ])
+}

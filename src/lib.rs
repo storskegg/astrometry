@@ -3,12 +3,14 @@
 
 pub mod angles;
 pub mod apparent;
+pub mod ayanamsa;
 mod cheb;
 pub mod derived;
 #[cfg(feature = "theories")]
 pub mod elpmpp02;
 pub mod events;
 pub mod horizon;
+pub mod houses;
 pub mod nutation;
 pub mod precession;
 pub mod sidereal;

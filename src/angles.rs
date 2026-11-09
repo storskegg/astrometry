@@ -2,10 +2,7 @@
 //! the Midheaven, the degree culminating on the meridian. Their opposites are the Descendant
 //! and the Imum Coeli.
 
-use crate::nutation::nutation;
-use crate::precession::mean_obliquity;
-use crate::sidereal::gast;
-use crate::time::ut1_from_tt;
+use crate::houses::ramc_and_obliquity;
 
 /// The Ascendant and Midheaven, degrees, 0–360 from 0° Aries.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,8 +17,7 @@ pub struct Angles {
 /// Within the polar circles, where some of the ecliptic never rises, the Ascendant is the
 /// formula's, which there can lie west of the Midheaven.
 pub fn angles(tt: f64, lat: f64, lon: f64) -> Angles {
-    let obliquity = mean_obliquity(tt) + nutation(tt).1;
-    let ramc = gast(ut1_from_tt(tt), tt) + lon.to_radians();
+    let (ramc, obliquity) = ramc_and_obliquity(tt, lon);
     from_ramc(ramc, obliquity, lat.to_radians())
 }
 
