@@ -4,9 +4,9 @@
 //! seven planets, the nodes, the Ptolemaic aspects and Lilly's moieties, while here the caller
 //! picks the points ([`Point`]), the aspects ([`Kind`]) and the orb of every pair and kind.
 //!
-//! Not every [`Point`] can be had yet: [`Point::available`] says which (Uranus, Neptune and
-//! Pluto are still to come). Asking [`positions`] for one that isn't gives
-//! [`Error::Unavailable`]. The angles, the mean nodes and Lilith need no ephemeris.
+//! Not every [`Point`] can be had in every build: [`Point::available`] says which (Uranus,
+//! Neptune and Pluto need the `outer-planets` feature). Asking [`positions`] for one that isn't
+//! gives [`Error::Unavailable`]. The angles, the mean nodes and Lilith need no ephemeris.
 //!
 //! # Orbs
 //!
@@ -39,7 +39,7 @@
 use std::fmt;
 
 use astrometry::derived::{diff, mean_apogee, mean_apogee_speed, mean_node, mean_node_speed};
-use astrometry::source::Source;
+use astrometry::source::{Body, Source};
 
 use crate::angles::angles;
 use crate::aspect::angle as separation;
@@ -85,11 +85,17 @@ impl Point {
         ][self as usize]
     }
 
-    /// Whether [`positions`] can give this point in this release: the seven planets, the true
-    /// and mean nodes, Lilith and the four angles. Uranus, Neptune and Pluto come in a later
-    /// release.
+    /// Whether [`positions`] can give this point in this build: the seven planets, the true
+    /// and mean nodes, Lilith and the four angles always. Uranus, Neptune and Pluto only with
+    /// the `outer-planets` feature, and, in a build without `embedded`, once
+    /// `astrometry::slice::install_outer` has been given their file; a source that has no
+    /// data for them makes [`positions`] fail with the ephemeris' error, not
+    /// [`Error::Unavailable`].
     pub fn available(self) -> bool {
-        !matches!(self, Point::Uranus | Point::Neptune | Point::Pluto)
+        match self {
+            Point::Uranus | Point::Neptune | Point::Pluto => cfg!(feature = "outer-planets"),
+            _ => true,
+        }
     }
 
     /// The corresponding [`crate::Point`], for the planets and the true nodes.
@@ -269,6 +275,21 @@ pub fn positions(
     } else {
         None
     };
+    // The outer planets are the ephemeris' own, as `crate::Position::at` takes the planets.
+    let mut outer = Vec::new();
+    for &point in points {
+        let body = match point {
+            Point::Uranus => Body::Uranus,
+            Point::Neptune => Body::Neptune,
+            Point::Pluto => Body::Pluto,
+            _ => continue,
+        };
+        let longitude = astrometry::apparent::apparent(src, body, tt)?.longitude;
+        outer.push((
+            point,
+            (longitude, astrometry::derived::speed(src, body, tt)?),
+        ));
+    }
     let now = angles(tt, lat, lon);
     let before = angles(tt - ANGLE_STEP, lat, lon);
     let after = angles(tt + ANGLE_STEP, lat, lon);
@@ -287,6 +308,13 @@ pub fn positions(
                 Point::MeanNorthNode => (mean_node(tt), mean_node_speed(tt)),
                 Point::MeanSouthNode => (opposite(mean_node(tt)), mean_node_speed(tt)),
                 Point::Lilith => (mean_apogee(tt), mean_apogee_speed(tt)),
+                Point::Uranus | Point::Neptune | Point::Pluto => {
+                    outer
+                        .iter()
+                        .find(|(p, ..)| *p == point)
+                        .expect("computed")
+                        .1
+                }
                 _ => {
                     let base = point.base().expect("available and not an angle");
                     let p = all.as_ref().expect("computed for a base point")[base.index()];
@@ -617,18 +645,41 @@ mod tests {
         assert_eq!(got.iter().map(|p| p.point).collect::<Vec<_>>(), want);
     }
 
+    #[cfg(feature = "outer-planets")]
+    #[test]
+    fn the_outer_planets_are_the_ephemerides_own() {
+        use astrometry::apparent::apparent;
+        use astrometry::derived::speed;
+        let points = [Point::Pluto, Point::Sun, Point::Uranus, Point::Neptune];
+        let bodies = [Body::Pluto, Body::Sun, Body::Uranus, Body::Neptune];
+        let got = positions(&Builtin, TT, 43.07, -89.4, &points).unwrap();
+        assert_eq!(got.iter().map(|p| p.point).collect::<Vec<_>>(), points);
+        for (g, body) in got.iter().zip(bodies) {
+            assert!(g.point.available());
+            let lon = apparent(&Builtin, body, TT).unwrap().longitude;
+            assert_eq!(g.longitude.to_bits(), lon.to_bits());
+            let spd = speed(&Builtin, body, TT).unwrap();
+            assert_eq!(g.speed.to_bits(), spd.to_bits());
+        }
+        // The three planets are in three places.
+        assert!(got[0].longitude != got[2].longitude && got[2].longitude != got[3].longitude);
+    }
+
     #[test]
     fn errors() {
-        let e = positions(
-            &Builtin,
-            TT,
-            0.0,
-            0.0,
-            &[Point::Sun, Point::Uranus, Point::Pluto],
-        )
-        .unwrap_err();
-        assert!(matches!(e, Error::Unavailable(Point::Uranus)));
-        assert_eq!(e.to_string(), "horae: Uranus isn't available in this build");
+        #[cfg(not(feature = "outer-planets"))]
+        {
+            let e = positions(
+                &Builtin,
+                TT,
+                0.0,
+                0.0,
+                &[Point::Sun, Point::Uranus, Point::Pluto],
+            )
+            .unwrap_err();
+            assert!(matches!(e, Error::Unavailable(Point::Uranus)));
+            assert_eq!(e.to_string(), "horae: Uranus isn't available in this build");
+        }
         let e = positions(&Builtin, TT, 91.0, 0.0, &[Point::Sun]).unwrap_err();
         assert!(matches!(
             e,

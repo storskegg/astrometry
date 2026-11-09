@@ -68,7 +68,10 @@ the old item is deprecated first, naming its replacement, and removed no sooner 
 later, in a release whose notes say "Breaking:". The `embedded` feature, on by default, compiles the DE440 slice in; with
 `default-features = false` on both, `astrometry::slice::install(&bytes)` takes
 `data/de440-1800-2200.bin` at run time instead (a browser's build, say), and without `theories`, also on by default, dates beyond 1800–2200
-are errors, not VSOP87E and ELP/MPP02's. The `serde` feature
+are errors, not VSOP87E and ELP/MPP02's. The `outer-planets` feature, off by default, adds Uranus,
+Neptune and Pluto (DE440's barycentres, 0.7 MB, 1800–2200 only; outside it they are errors):
+compiled in with `embedded`, otherwise `astrometry::slice::install_outer(&bytes)` takes
+`data/de440-outer-1800-2200.bin`, and horae's `chart` then gives them. The `serde` feature
 (of either) serializes their results; horae's names its
 members, as "North Node" and "Under the Beams".
 
@@ -81,7 +84,8 @@ tests run too, against the full file.
 
 - `cargo xtask fixtures [PART...]` fetches the reference data again: JPL Horizons, the IERS,
   USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers.
-- `cargo xtask de440` cuts the built-in slice from `de440.bsp`.
+- `cargo xtask de440` cuts the built-in slice from `de440.bsp`, and `cargo xtask outer` the
+  outer planets' file.
 
 ## License
 
