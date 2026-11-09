@@ -401,6 +401,39 @@ pub fn positions(
         .collect())
 }
 
+/// [`positions`] in a chosen zodiac.
+///
+/// [`Zodiac::Tropical`] gives `positions`' result, bit for bit. For [`Zodiac::Sidereal`], every
+/// longitude, the angles' included, is the tropical one less the ayanamsa at `tt`, normalised
+/// to 0–360 (the ayanamsa includes the nutation, so this is from the apparent longitude). Every
+/// speed is the tropical one less the ayanamsa's own rate, degrees per day, taken over
+/// [`astrometry::derived::STEP`] either side: about 0.000038°/day, with the nutation's wobble.
+///
+/// [`aspects`] don't depend on the zodiac, apart from rounding: every point moves by the same
+/// amount, so the separations are unchanged.
+pub fn positions_in(
+    src: &dyn Source,
+    tt: f64,
+    lat: f64,
+    lon: f64,
+    points: &[Point],
+    zodiac: Zodiac,
+) -> Result<Vec<Position>, Error> {
+    let mut out = positions(src, tt, lat, lon, points)?;
+    if let Zodiac::Sidereal(a) = zodiac {
+        let shift = a.at(tt);
+        let rate = diff(
+            a.at(tt + astrometry::derived::STEP),
+            a.at(tt - astrometry::derived::STEP),
+        ) / (2.0 * astrometry::derived::STEP);
+        for p in &mut out {
+            p.longitude = (p.longitude - shift).rem_euclid(360.0);
+            p.speed -= rate;
+        }
+    }
+    Ok(out)
+}
+
 /// The aspects among `positions` of the given `kinds`, closest to exact first.
 ///
 /// Every pair `i < j` is checked, in order, so an aspect's `points` are
@@ -1625,5 +1658,55 @@ mod declination_tests {
             "contraparallel".parse::<ParallelKind>(),
             Ok(ParallelKind::Contraparallel)
         );
+    }
+
+    #[test]
+    fn positions_in_a_zodiac() {
+        let points: Vec<Point> = Point::ALL
+            .iter()
+            .copied()
+            .filter(|p| p.available())
+            .collect();
+        let (lat, lon) = (43.07, -89.4);
+        let tropical = positions(&Builtin, TT, lat, lon, &points).unwrap();
+        assert_eq!(
+            positions_in(&Builtin, TT, lat, lon, &points, Zodiac::Tropical).unwrap(),
+            tropical
+        );
+        for aya in [Ayanamsa::FaganBradley, Ayanamsa::Lahiri] {
+            let sidereal =
+                positions_in(&Builtin, TT, lat, lon, &points, Zodiac::Sidereal(aya)).unwrap();
+            let rate = diff(aya.at(TT + STEP), aya.at(TT - STEP)) / (2.0 * STEP);
+            assert!((rate - 0.000038).abs() < 1e-4, "{rate}");
+            for (t, s) in tropical.iter().zip(&sidereal) {
+                assert_eq!(t.point, s.point);
+                assert_eq!(s.longitude, (t.longitude - aya.at(TT)).rem_euclid(360.0));
+                assert!((0.0..360.0).contains(&s.longitude));
+                assert_eq!(s.speed, t.speed - rate);
+            }
+            let kinds = [
+                Kind::Conjunction,
+                Kind::Sextile,
+                Kind::Square,
+                Kind::Trine,
+                Kind::Opposition,
+            ];
+            let orb = |_: Point, _: Point, _: Kind| Some(8.0);
+            let (a, b) = (
+                aspects(&tropical, &kinds, orb),
+                aspects(&sidereal, &kinds, orb),
+            );
+            assert!(!a.is_empty());
+            // Closest to exact first, which rounding can reorder: compare by pair and kind.
+            let (mut a, mut b) = (a, b);
+            for list in [&mut a, &mut b] {
+                list.sort_by_key(|x| (x.points[0] as u8, x.points[1] as u8, x.kind as u8));
+            }
+            assert_eq!(a.len(), b.len());
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!((x.points, x.kind), (y.points, y.kind));
+                assert!((x.orb - y.orb).abs() < 1e-9 && (x.angle - y.angle).abs() < 1e-9);
+            }
+        }
     }
 }

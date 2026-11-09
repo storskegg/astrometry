@@ -362,6 +362,30 @@ mod json {
         }
     }
 
+    // `course_in` gives the same `Course`, serialized as `course` does.
+    #[test]
+    fn course_in_json_shape() {
+        use horae::chart::{Ayanamsa, Zodiac};
+        let tz = TimeZone::get("America/Chicago").unwrap();
+        let tt = horae::time::tt(
+            date(2026, 10, 15)
+                .at(13, 14, 0, 0)
+                .to_zoned(tz.clone())
+                .unwrap()
+                .timestamp(),
+        );
+        let value =
+            |z| serde_json::to_value(moon::course_in(&Builtin, tt, &tz, z).unwrap()).unwrap();
+        let tropical = serde_json::to_value(moon::course(&Builtin, tt, &tz).unwrap()).unwrap();
+        assert_eq!(value(Zodiac::Tropical), tropical);
+        let keys = |v: &serde_json::Value| -> Vec<String> {
+            v.as_object().unwrap().keys().cloned().collect()
+        };
+        let sidereal = value(Zodiac::Sidereal(Ayanamsa::Lahiri));
+        assert_eq!(keys(&tropical), ["aspects", "leaves_sign"]);
+        assert_eq!(keys(&sidereal), keys(&tropical));
+    }
+
     #[test]
     fn json_shape() {
         let tz = TimeZone::get("America/Chicago").unwrap();
