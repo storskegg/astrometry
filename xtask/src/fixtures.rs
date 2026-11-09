@@ -40,7 +40,7 @@ use crate::{Result, root};
 const HORIZONS: &str = "https://ssd.jpl.nasa.gov/api/horizons.api";
 
 /// The bodies, by Horizons ID.
-const BODIES: [(&str, &str); 10] = [
+const BODIES: [(&str, &str); 13] = [
     ("Sun", "10"),
     ("Moon", "301"),
     ("Mercury", "199"),
@@ -52,6 +52,10 @@ const BODIES: [(&str, &str); 10] = [
     ("MarsBarycenter", "4"),
     ("JupiterBarycenter", "5"),
     ("SaturnBarycenter", "6"),
+    // The outer planets, as DE440's barycentres (7, 8, 9), which the `outer-planets` feature has.
+    ("UranusBarycenter", "7"),
+    ("NeptuneBarycenter", "8"),
+    ("PlutoBarycenter", "9"),
 ];
 
 /// The fixtures, by name.

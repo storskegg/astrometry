@@ -26,6 +26,12 @@ fn body(name: &str) -> Option<Body> {
         "Mars" => Body::Mars,
         "Jupiter" => Body::Jupiter,
         "Saturn" => Body::Saturn,
+        #[cfg(feature = "outer-planets")]
+        "Uranus" => Body::Uranus,
+        #[cfg(feature = "outer-planets")]
+        "Neptune" => Body::Neptune,
+        #[cfg(feature = "outer-planets")]
+        "Pluto" => Body::Pluto,
         _ => return None,
     })
 }
@@ -49,7 +55,11 @@ fn speeds_and_nodes_against_swiss_ephemeris() {
                 mas = mas.max((mean_apogee_speed(jd) - spd).abs() * 3600.0);
             }
             name => {
-                let b = body(name).unwrap();
+                // Without the `outer-planets` feature, the outer planets' rows are skipped.
+                let Some(b) = body(name) else {
+                    assert!(matches!(name, "Uranus" | "Neptune" | "Pluto"), "{name}");
+                    continue;
+                };
                 let got = speed(&Builtin, b, jd).unwrap();
                 // Relative to the body's typical daily motion.
                 speeds = speeds.max((got - spd).abs() * 3600.0);

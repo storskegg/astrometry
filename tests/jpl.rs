@@ -45,6 +45,13 @@ fn body(name: &str) -> Option<Body> {
         "MarsBarycenter" => Body::Mars,
         "JupiterBarycenter" => Body::Jupiter,
         "SaturnBarycenter" => Body::Saturn,
+        // The outer planets' rows are checked where the feature gives them (CI has it).
+        #[cfg(feature = "outer-planets")]
+        "UranusBarycenter" => Body::Uranus,
+        #[cfg(feature = "outer-planets")]
+        "NeptuneBarycenter" => Body::Neptune,
+        #[cfg(feature = "outer-planets")]
+        "PlutoBarycenter" => Body::Pluto,
         _ => return None,
     })
 }
@@ -148,6 +155,12 @@ fn against_swiss_ephemeris(src: &dyn Source) {
             "Mars" => Body::Mars,
             "Jupiter" => Body::Jupiter,
             "Saturn" => Body::Saturn,
+            #[cfg(feature = "outer-planets")]
+            "Uranus" => Body::Uranus,
+            #[cfg(feature = "outer-planets")]
+            "Neptune" => Body::Neptune,
+            #[cfg(feature = "outer-planets")]
+            "Pluto" => Body::Pluto,
             name => body(name)?,
         };
         Some((
@@ -208,4 +221,22 @@ fn builtin_against_horizons_relative_to_the_sun() {
 #[test]
 fn builtin_against_swiss_ephemeris() {
     against_swiss_ephemeris(&Builtin);
+}
+
+// Without the feature the outer planets are "not covered" errors, as is any date beyond the
+// slice's, where no theory covers them.
+#[test]
+fn the_outer_planets_are_errors_where_they_are_not_covered() {
+    use astrometry::spk::Error;
+    for b in [Body::Uranus, Body::Neptune, Body::Pluto] {
+        let beyond = Builtin.state(b, 2_600_000.5);
+        assert!(matches!(beyond, Err(Error::NoSegment { center: 0, .. })));
+        #[cfg(not(feature = "outer-planets"))]
+        assert!(matches!(
+            Builtin.state(b, 2_451_545.0),
+            Err(Error::NoSegment { center: 0, .. })
+        ));
+        #[cfg(feature = "outer-planets")]
+        assert!(Builtin.state(b, 2_451_545.0).is_ok());
+    }
 }

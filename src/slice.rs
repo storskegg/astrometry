@@ -16,6 +16,10 @@
 //! block, its byte offset in the file (u64) and its length (u32). Then the blocks, each
 //! deflated on its own: the zigzag varints of its records' coefficients, record after record,
 //! x, y, z. All little-endian; the file as a whole isn't deflated.
+//!
+//! With the `outer-planets` feature there's a second file of the same format and span,
+//! `data/de440-outer-1800-2200.bin` (`cargo xtask outer`): Uranus, Neptune and Pluto's
+//! barycentres (7, 8, 9) about the solar-system barycentre, rounded to the same 1 m.
 
 use std::io::Read;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -288,6 +292,51 @@ fn slice() -> &'static [Segment] {
     )
 }
 
+/// The outer planets' segments, Uranus, Neptune and Pluto about the solar-system barycentre,
+/// from their own file: the same format and span as the main slice.
+#[cfg(feature = "outer-planets")]
+static OUTER: OnceLock<Vec<Segment>> = OnceLock::new();
+
+/// Installs the outer planets' file, `data/de440-outer-1800-2200.bin`, for a build with
+/// `outer-planets` but without `embedded`, as [`install`] does the main slice. Once per
+/// process: an error if it's installed already, as it always is with `embedded`, or if the
+/// bytes aren't a slice. It keeps a copy of the bytes.
+#[cfg(feature = "outer-planets")]
+pub fn install_outer(bytes: &[u8]) -> Result<(), String> {
+    if OUTER.get().is_some() || cfg!(feature = "embedded") {
+        return Err("slice: the outer planets are installed already".into());
+    }
+    OUTER
+        .set(decode(bytes)?)
+        .map_err(|_| "slice: the outer planets are installed already".into())
+}
+
+/// Whether the outer planets' file is there: always with `embedded`, otherwise once
+/// [`install_outer`]ed.
+#[cfg(feature = "outer-planets")]
+pub fn outer_installed() -> bool {
+    cfg!(feature = "embedded") || OUTER.get().is_some()
+}
+
+/// The outer planets' segment for `target` relative to `center`; none if there isn't one, or
+/// in a build without `embedded` before [`install_outer`] (so that the planets are then "not
+/// covered" errors, not panics).
+#[cfg(feature = "outer-planets")]
+pub fn outer_segment(target: i32, center: i32) -> Option<&'static Segment> {
+    #[cfg(feature = "embedded")]
+    let segs = OUTER.get_or_init(|| {
+        let bytes: &'static [u8] = include_bytes!("../data/de440-outer-1800-2200.bin");
+        segments(
+            parse(bytes).expect("the built-in outer slice"),
+            &Bytes::Static(bytes),
+        )
+    });
+    #[cfg(not(feature = "embedded"))]
+    let segs = OUTER.get()?;
+    segs.iter()
+        .find(|s| s.target == target && s.center == center)
+}
+
 /// The built-in slice's segment for `target` relative to `center`. Panics if the slice isn't
 /// [`install`]ed in a build without `embedded`, rather than fall back to the theories unseen.
 pub fn segment(target: i32, center: i32) -> Option<&'static Segment> {
@@ -307,6 +356,21 @@ mod install_tests {
         super::install(&bytes).unwrap();
         assert!(super::installed() && super::install(&bytes).is_err());
         assert!(super::segment(301, 3).is_some());
+    }
+
+    #[cfg(feature = "outer-planets")]
+    #[test]
+    fn install_outer_from_bytes() {
+        assert!(!super::outer_installed() && super::outer_segment(7, 0).is_none());
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data/de440-outer-1800-2200.bin"
+        );
+        let bytes = std::fs::read(path).unwrap();
+        assert!(super::install_outer(b"not a slice").is_err());
+        super::install_outer(&bytes).unwrap();
+        assert!(super::outer_installed() && super::install_outer(&bytes).is_err());
+        assert!(super::outer_segment(7, 0).is_some() && super::outer_segment(301, 3).is_none());
     }
 }
 
@@ -387,6 +451,18 @@ mod tests {
         let cache = moon.cache.lock().unwrap();
         let held: Vec<usize> = cache.iter().map(|(k, _)| *k).collect();
         assert_eq!(held, [49, 48, 47, 46]);
+    }
+
+    #[cfg(all(feature = "embedded", feature = "outer-planets"))]
+    #[test]
+    fn the_outer_file_has_uranus_neptune_and_pluto_about_the_barycentre() {
+        let segs = decode(include_bytes!("../data/de440-outer-1800-2200.bin")).unwrap();
+        let targets: Vec<_> = segs.iter().map(|s| (s.target, s.center)).collect();
+        assert_eq!(targets, [(7, 0), (8, 0), (9, 0)]);
+        assert_eq!(segs[0].span(), moon(&built()).span());
+        for t in 7..=9 {
+            assert!(outer_segment(t, 0).is_some());
+        }
     }
 
     #[cfg(feature = "embedded")]

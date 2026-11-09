@@ -15,6 +15,8 @@ tasks:
                  the Swiss Ephemeris' numbers), or the named parts
   de440          cut the crate's built-in slice of DE440 from de440.bsp (ASTROMETRY_DE440,
                  or target/jpl/de440.bsp)
+  outer          cut the outer planets' file (Uranus, Neptune, Pluto; feature `outer-planets`)
+                 from the same de440.bsp
   version [DATE] [--write]
                  print the next calendar version YYYY.WW.PATCH for DATE (YYYY-MM-DD, default
                  today in UTC); --write sets it in the manifests, README and Cargo.lock.
@@ -29,6 +31,7 @@ fn main() -> ExitCode {
     let result = match args.as_slice() {
         ["fixtures", parts @ ..] => fixtures::run(parts),
         ["de440"] => de440::run(),
+        ["outer"] => de440::outer(),
         ["version", rest @ ..] => version::run(rest),
         ["help" | "--help" | "-h"] => {
             print!("{USAGE}");

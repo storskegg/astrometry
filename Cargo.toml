@@ -19,6 +19,9 @@ embedded = []
 # VSOP87E and ELP/MPP02 (some 2 MB of series), for dates beyond the slice; without them,
 # those are errors.
 theories = []
+# Uranus, Neptune and Pluto from DE440, in a file of their own (0.7 MB): compiled in with
+# `embedded`, otherwise given by `slice::install_outer`. Without it, they are errors.
+outer-planets = []
 # Serialize and Deserialize for the angles and stations.
 serde = ["dep:serde"]
 

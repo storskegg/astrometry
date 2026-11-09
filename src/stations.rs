@@ -28,12 +28,16 @@ pub fn longest_between(body: Body) -> Option<f64> {
         Body::Mars => Some(760.0),    // 720
         Body::Jupiter => Some(300.0), // 280
         Body::Saturn => Some(260.0),  // 240
+        Body::Uranus => Some(245.0),  // 221, measured over 1800–2200
+        Body::Neptune => Some(235.0), // 211
+        Body::Pluto => Some(235.0),   // 212
     }
 }
 
 /// How far apart a planet's speed is sampled, days: a quarter of its briefest motion between
 /// stations, its retrograde (Mercury's some 20 days, Venus's 40, Mars's 58, Jupiter's 118,
-/// Saturn's 136), so that no two stations fall between samples.
+/// Saturn's 136, Uranus's 149, Neptune's 156, Pluto's 156), so that no two stations fall
+/// between samples.
 fn step(body: Body) -> f64 {
     match body {
         Body::Mercury => 5.0,
@@ -41,6 +45,9 @@ fn step(body: Body) -> f64 {
         Body::Mars => 14.0,
         Body::Jupiter => 29.0,
         Body::Saturn => 34.0,
+        Body::Uranus => 37.0,
+        Body::Neptune => 39.0,
+        Body::Pluto => 39.0,
         Body::Sun | Body::Moon | Body::Earth => f64::INFINITY,
     }
 }

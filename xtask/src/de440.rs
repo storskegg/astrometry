@@ -1,6 +1,6 @@
-//! `cargo xtask de440`: cuts the crate's built-in slice of DE440 (see its
-//! `slice` module for the format) from a downloaded de440.bsp: `ASTROMETRY_DE440`, or
-//! `target/jpl/de440.bsp`.
+//! `cargo xtask de440` and `cargo xtask outer`: cut the crate's built-in slice of DE440 (see
+//! its `slice` module for the format), and the outer planets' file, from a downloaded
+//! de440.bsp: `ASTROMETRY_DE440`, or `target/jpl/de440.bsp`.
 
 use std::io::Write;
 
@@ -26,11 +26,24 @@ const SEGMENTS: [(i32, i32, f64); 8] = [
     (6, 0, 1e-3),
 ];
 
+/// The outer planets' file: Uranus, Neptune and Pluto's barycentres about the solar-system
+/// barycentre, to the same 1 m. Their own centres are within about 0.01″ of these, geocentrically.
+const OUTER: [(i32, i32, f64); 3] = [(7, 0, 1e-3), (8, 0, 1e-3), (9, 0, 1e-3)];
+
 /// 1800-01-01 and 2200-01-01, TDB Julian dates.
 const FROM: f64 = 2378496.5;
 const TO: f64 = 2524593.5;
 
 pub fn run() -> Result {
+    cut(&SEGMENTS, "data/de440-1800-2200.bin")
+}
+
+/// `cargo xtask outer`: the same, for the file behind the `outer-planets` feature.
+pub fn outer() -> Result {
+    cut(&OUTER, "data/de440-outer-1800-2200.bin")
+}
+
+fn cut(segments: &[(i32, i32, f64)], file: &str) -> Result {
     let path = std::env::var_os("ASTROMETRY_DE440")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| root().join("target/jpl/de440.bsp"));
@@ -40,7 +53,7 @@ pub fn run() -> Result {
     let mut tables: Vec<Vec<(u64, u32)>> = Vec::new();
     let mut blocks: Vec<Vec<u8>> = Vec::new();
     let mut total = 0;
-    for (target, center, step) in SEGMENTS {
+    for &(target, center, step) in segments {
         let r = spk
             .records(target, center, FROM, TO)
             .map_err(|e| e.to_string())?;
@@ -105,7 +118,7 @@ pub fn run() -> Result {
     }
     let mut out = Vec::new();
     out.extend(b"ASTRDE02");
-    out.extend((SEGMENTS.len() as u32).to_le_bytes());
+    out.extend((segments.len() as u32).to_le_bytes());
     for (head, table) in heads.iter().zip(&tables) {
         out.extend(head);
         for &(offset, len) in table {
@@ -116,7 +129,7 @@ pub fn run() -> Result {
     for block in &blocks {
         out.extend(block);
     }
-    let file = root().join("data/de440-1800-2200.bin");
+    let file = root().join(file);
     std::fs::write(&file, &out).map_err(|e| e.to_string())?;
     println!(
         "wrote {} ({} bytes in {total} blocks)",

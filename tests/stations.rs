@@ -98,3 +98,31 @@ fn angles_turn_with_the_day() {
     let east = (a.ascendant - a.midheaven).rem_euclid(360.0);
     assert!(east > 0.0 && east < 180.0, "{a:?}");
 }
+
+// The outer planets turn every 6 to 7 months, retrograde and direct in turn, over the whole
+// slice, and the intervals stay inside the constants `stations` samples by.
+#[cfg(feature = "outer-planets")]
+#[test]
+fn the_outer_planets_alternate_within_their_bounds() {
+    for (body, direct, retro) in [
+        (Body::Uranus, 245.0, 149.0),
+        (Body::Neptune, 235.0, 156.0),
+        (Body::Pluto, 235.0, 156.0),
+    ] {
+        let all = stations(&Builtin, body, tt(1800, 6, 1), tt(2199, 6, 1)).unwrap();
+        assert!(all.len() > 700, "{body:?}: {}", all.len());
+        for w in all.windows(2) {
+            assert_ne!(w[0].retrograde, w[1].retrograde, "{body:?}");
+            let days = w[1].tt - w[0].tt;
+            let (short, long) = if w[1].retrograde {
+                (direct - 50.0, direct)
+            } else {
+                (retro - 5.0, 170.0)
+            };
+            assert!(days > short && days < long, "{body:?}: {days}");
+        }
+        for s in &all {
+            assert!(speed(&Builtin, body, s.tt).unwrap().abs() < 1e-3);
+        }
+    }
+}

@@ -17,6 +17,9 @@ default = ["embedded", "theories"]
 embedded = ["astrometry/embedded"]
 # astrometry's: VSOP87E and ELP/MPP02 beyond 1800–2200, or errors there.
 theories = ["astrometry/theories"]
+# astrometry's: Uranus, Neptune and Pluto, in `chart` (with `embedded`, or given by
+# `astrometry::slice::install_outer`).
+outer-planets = ["astrometry/outer-planets"]
 serde = ["dep:serde", "jiff/serde", "astrometry/serde"]
 
 [dependencies]

@@ -21,6 +21,15 @@ pub enum Body {
     Mars,
     Jupiter,
     Saturn,
+    /// DE440's barycentre of the Uranus system (7), within about 0.01″ of the planet's own centre
+    /// as seen from the Earth. Needs the `outer-planets` feature, or [`Jpl`].
+    Uranus,
+    /// DE440's barycentre of the Neptune system (8), within about 0.01″ of the planet's own
+    /// centre as seen from the Earth. Needs the `outer-planets` feature, or [`Jpl`].
+    Neptune,
+    /// DE440's barycentre of the Pluto system (9), within about 0.01″ of the planet's own
+    /// centre as seen from the Earth. Needs the `outer-planets` feature, or [`Jpl`].
+    Pluto,
 }
 
 /// The astronomical unit, km.
@@ -85,6 +94,9 @@ impl Source for Jpl {
             Body::Mars => &[(4, 0)],
             Body::Jupiter => &[(5, 0)],
             Body::Saturn => &[(6, 0)],
+            Body::Uranus => &[(7, 0)],
+            Body::Neptune => &[(8, 0)],
+            Body::Pluto => &[(9, 0)],
         };
         let mut state = ([0.0; 3], [0.0; 3]);
         for &(target, center) in chain {
@@ -120,6 +132,19 @@ impl Source for Builtin {
             let (p, v) = crate::slice::segment(target, center)?.state_after(tdb, secs)?;
             Some((scale(1.0 / AU, p), scale(86400.0 / AU, v)))
         };
+        // The outer planets' own file, if the feature is on and the file is there.
+        let outer = |target: i32| -> Option<(Vec3, Vec3)> {
+            #[cfg(feature = "outer-planets")]
+            {
+                let (p, v) = crate::slice::outer_segment(target, 0)?.state_after(tdb, secs)?;
+                Some((scale(1.0 / AU, p), scale(86400.0 / AU, v)))
+            }
+            #[cfg(not(feature = "outer-planets"))]
+            {
+                let _ = target;
+                None
+            }
+        };
         let state = match body {
             Body::Sun => part(10, 0),
             Body::Mercury => part(1, 0),
@@ -127,6 +152,9 @@ impl Source for Builtin {
             Body::Mars => part(4, 0),
             Body::Jupiter => part(5, 0),
             Body::Saturn => part(6, 0),
+            Body::Uranus => outer(7),
+            Body::Neptune => outer(8),
+            Body::Pluto => outer(9),
             Body::Earth | Body::Moon => part(3, 0).zip(part(301, 3)).map(|((ep, ev), (mp, mv))| {
                 let k = if body == Body::Moon {
                     1.0
@@ -174,6 +202,9 @@ impl Source for Analytic {
             Body::Mars => 4,
             Body::Jupiter => 5,
             Body::Saturn => 6,
+            Body::Uranus => 7,
+            Body::Neptune => 8,
+            Body::Pluto => 9,
         };
         Err(spk::Error::NoSegment {
             target,
@@ -193,6 +224,18 @@ impl Source for Analytic {
             Body::Mars => &*vsop87::MARS,
             Body::Jupiter => &*vsop87::JUPITER,
             Body::Saturn => &*vsop87::SATURN,
+            // No theory for them here: outside the slice they are errors, as without `theories`.
+            Body::Uranus | Body::Neptune | Body::Pluto => {
+                return Err(spk::Error::NoSegment {
+                    target: match body {
+                        Body::Uranus => 7,
+                        Body::Neptune => 8,
+                        _ => 9,
+                    },
+                    center: 0,
+                    jd: tdb,
+                });
+            }
         };
         let (p, v) = series.at(t);
         let (mut p, mut v) = (
