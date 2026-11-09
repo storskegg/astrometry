@@ -31,7 +31,7 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "astrometry"
-version = "2026.46.3"
+version = "2026.46.4"
 dependencies = [
  "flate2",
  "serde",
@@ -192,7 +192,7 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "horae"
-version = "2026.46.3"
+version = "2026.46.4"
 dependencies = [
  "astrometry",
  "criterion",
