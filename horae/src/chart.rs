@@ -92,10 +92,8 @@ impl Point {
     /// data for them makes [`positions`] fail with the ephemeris' error, not
     /// [`Error::Unavailable`].
     pub fn available(self) -> bool {
-        match self {
-            Point::Uranus | Point::Neptune | Point::Pluto => cfg!(feature = "outer-planets"),
-            _ => true,
-        }
+        cfg!(feature = "outer-planets")
+            || !matches!(self, Point::Uranus | Point::Neptune | Point::Pluto)
     }
 
     /// The corresponding [`crate::Point`], for the planets and the true nodes.
