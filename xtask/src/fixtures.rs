@@ -33,6 +33,8 @@
 //! - `tests/data/swisseph/houses.tsv`: its house cusps (Placidus, Koch, Equal, Whole Sign)
 //!   on a grid of sidereal time, latitude and obliquity, its Fagan-Bradley and Lahiri
 //!   ayanamsas, and a few sidereal Sun and Moon longitudes.
+//! - `tests/data/swisseph/declinations.tsv`: its apparent declinations and their speeds
+//!   (JPL mode), for the planets, the mean and true nodes and the mean apogee.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -65,7 +67,7 @@ const BODIES: [(&str, &str); 13] = [
 /// A fixture: what makes it.
 type Part = fn() -> Result;
 
-const PARTS: [(&str, Part); 10] = [
+const PARTS: [(&str, Part); 11] = [
     ("deltat", deltat),
     ("usno", usno),
     ("leap-seconds", leap_seconds),
@@ -76,6 +78,7 @@ const PARTS: [(&str, Part); 10] = [
     ("rise-set", rise_set),
     ("swisseph", swisseph),
     ("houses", houses),
+    ("declinations", declinations),
 ];
 
 /// `cargo xtask fixtures [PART...]`: fetches the named fixtures, or every one.
@@ -115,6 +118,14 @@ fn swisseph() -> Result {
 /// The Swiss Ephemeris' house cusps and ayanamsas, by `fixtures/swisseph_houses.py`.
 fn houses() -> Result {
     swiss_run("swisseph_houses.py", "tests/data/swisseph/houses.tsv")
+}
+
+/// The Swiss Ephemeris' declinations, by `fixtures/swisseph_declinations.py`.
+fn declinations() -> Result {
+    swiss_run(
+        "swisseph_declinations.py",
+        "tests/data/swisseph/declinations.tsv",
+    )
 }
 
 /// Runs a Swiss Ephemeris script from `fixtures/` in the virtual environment, writing `out`.
