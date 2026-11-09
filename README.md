@@ -47,7 +47,7 @@ let sun = apparent(&Builtin, Body::Sun, tt)?;
 println!("{:.5}° {:.5}°", sun.longitude, sun.latitude);
 ```
 
-`cargo run --example sun` runs it. Rust 1.92 or later. Not on crates.io yet; as a git
+`cargo run --example sun` runs it. Rust 1.99 or later. Not on crates.io yet; as a git
 dependency:
 
 ```toml
