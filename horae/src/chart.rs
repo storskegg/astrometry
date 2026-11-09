@@ -4,8 +4,9 @@
 //! seven planets, the nodes, the Ptolemaic aspects and Lilly's moieties, while here the caller
 //! picks the points ([`Point`]), the aspects ([`Kind`]) and the orb of every pair and kind.
 //!
-//! Not every [`Point`] can be had yet: [`Point::available`] says which. Asking [`positions`]
-//! for one that isn't gives [`Error::Unavailable`]; the rest come in later releases.
+//! Not every [`Point`] can be had yet: [`Point::available`] says which (Uranus, Neptune and
+//! Pluto are still to come). Asking [`positions`] for one that isn't gives
+//! [`Error::Unavailable`]. The angles, the mean nodes and Lilith need no ephemeris.
 //!
 //! # Orbs
 //!
@@ -37,7 +38,7 @@
 
 use std::fmt;
 
-use astrometry::derived::diff;
+use astrometry::derived::{diff, mean_apogee, mean_apogee_speed, mean_node, mean_node_speed};
 use astrometry::source::Source;
 
 use crate::angles::angles;
@@ -85,18 +86,10 @@ impl Point {
     }
 
     /// Whether [`positions`] can give this point in this release: the seven planets, the true
-    /// nodes and the four angles. Uranus, Neptune, Pluto, the mean nodes and Lilith come in
-    /// later releases.
+    /// and mean nodes, Lilith and the four angles. Uranus, Neptune and Pluto come in a later
+    /// release.
     pub fn available(self) -> bool {
-        !matches!(
-            self,
-            Point::Uranus
-                | Point::Neptune
-                | Point::Pluto
-                | Point::MeanNorthNode
-                | Point::MeanSouthNode
-                | Point::Lilith
-        )
+        !matches!(self, Point::Uranus | Point::Neptune | Point::Pluto)
     }
 
     /// The corresponding [`crate::Point`], for the planets and the true nodes.
@@ -257,7 +250,8 @@ impl From<EphemerisError> for Error {
 /// longitude `lon`, degrees, north and east positive.
 ///
 /// The planets and true nodes are [`crate::Position::all`]'s, bit for bit. The angles need no
-/// ephemeris; their speeds are taken over a minute either side. A point that isn't
+/// ephemeris; their speeds are taken over a minute either side. The mean nodes and Lilith (the
+/// mean lunar apogee) need none either: they come from `astrometry::derived`'s polynomials. A point that isn't
 /// [`Point::available`] gives [`Error::Unavailable`], the first such in `points`.
 pub fn positions(
     src: &dyn Source,
@@ -290,6 +284,9 @@ pub fn positions(
                 Point::Descendant => (opposite(now.ascendant), asc_speed),
                 Point::Midheaven => (now.midheaven, mc_speed),
                 Point::ImumCoeli => (opposite(now.midheaven), mc_speed),
+                Point::MeanNorthNode => (mean_node(tt), mean_node_speed(tt)),
+                Point::MeanSouthNode => (opposite(mean_node(tt)), mean_node_speed(tt)),
+                Point::Lilith => (mean_apogee(tt), mean_apogee_speed(tt)),
                 _ => {
                     let base = point.base().expect("available and not an angle");
                     let p = all.as_ref().expect("computed for a base point")[base.index()];
@@ -571,8 +568,45 @@ mod tests {
                 panic!("touched the ephemeris")
             }
         }
-        let got = positions(&Never, TT, 10.0, 20.0, &[Point::Midheaven]).unwrap();
-        assert_eq!(got.len(), 1);
+        let got = positions(
+            &Never,
+            TT,
+            10.0,
+            20.0,
+            &[
+                Point::Midheaven,
+                Point::MeanNorthNode,
+                Point::MeanSouthNode,
+                Point::Lilith,
+            ],
+        )
+        .unwrap();
+        assert_eq!(got.len(), 4);
+    }
+
+    #[test]
+    fn mean_points() {
+        use Point::*;
+        let got = positions(
+            &Builtin,
+            TT,
+            43.07,
+            -89.4,
+            &[MeanNorthNode, MeanSouthNode, Lilith],
+        )
+        .unwrap();
+        let [north, south, lilith] = got[..] else {
+            panic!()
+        };
+        assert_eq!(north.longitude, mean_node(TT));
+        assert_eq!(lilith.longitude, mean_apogee(TT));
+        assert!((diff(south.longitude, north.longitude).abs() - 180.0).abs() < 1e-9);
+        assert!((0.0..360.0).contains(&south.longitude));
+        assert_eq!(north.speed, mean_node_speed(TT));
+        assert_eq!(south.speed, north.speed);
+        assert_eq!(lilith.speed, mean_apogee_speed(TT));
+        assert!((north.speed + 0.053).abs() < 0.002, "{north:?}");
+        assert!((lilith.speed - 0.111).abs() < 0.002, "{lilith:?}");
     }
 
     #[test]
@@ -590,11 +624,11 @@ mod tests {
             TT,
             0.0,
             0.0,
-            &[Point::Sun, Point::Pluto, Point::Lilith],
+            &[Point::Sun, Point::Uranus, Point::Pluto],
         )
         .unwrap_err();
-        assert!(matches!(e, Error::Unavailable(Point::Pluto)));
-        assert_eq!(e.to_string(), "horae: Pluto isn't available in this build");
+        assert!(matches!(e, Error::Unavailable(Point::Uranus)));
+        assert_eq!(e.to_string(), "horae: Uranus isn't available in this build");
         let e = positions(&Builtin, TT, 91.0, 0.0, &[Point::Sun]).unwrap_err();
         assert!(matches!(
             e,
