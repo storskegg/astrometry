@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use astrometry::derived::{diff, mean_node, speed, true_node};
+use astrometry::derived::{
+    diff, mean_apogee, mean_apogee_speed, mean_node, mean_node_speed, speed, true_node,
+};
 use astrometry::source::{Body, Builtin};
 
 fn rows() -> Vec<Vec<String>> {
@@ -31,13 +33,21 @@ fn body(name: &str) -> Option<Body> {
 #[test]
 fn speeds_and_nodes_against_swiss_ephemeris() {
     let mut speeds = 0.0f64;
-    let (mut tn, mut mn) = (0.0f64, 0.0f64);
+    let (mut tn, mut mn, mut ma) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut mns, mut mas) = (0.0f64, 0.0f64);
     for r in rows() {
         let jd: f64 = r[2].parse().unwrap();
         let (lon, spd): (f64, f64) = (r[3].parse().unwrap(), r[6].parse().unwrap());
         match r[1].as_str() {
             "TrueNode" => tn = tn.max(diff(true_node(&Builtin, jd).unwrap(), lon).abs() * 3600.0),
-            "MeanNode" => mn = mn.max(diff(mean_node(jd), lon).abs() * 3600.0),
+            "MeanNode" => {
+                mn = mn.max(diff(mean_node(jd), lon).abs() * 3600.0);
+                mns = mns.max((mean_node_speed(jd) - spd).abs() * 3600.0);
+            }
+            "MeanApogee" => {
+                ma = ma.max(diff(mean_apogee(jd), lon).abs() * 3600.0);
+                mas = mas.max((mean_apogee_speed(jd) - spd).abs() * 3600.0);
+            }
             name => {
                 let b = body(name).unwrap();
                 let got = speed(&Builtin, b, jd).unwrap();
@@ -46,11 +56,18 @@ fn speeds_and_nodes_against_swiss_ephemeris() {
             }
         }
     }
-    println!("speeds within {speeds:.4}″/day; true node {tn:.3}″; mean node {mn:.3}″");
+    println!(
+        "speeds within {speeds:.4}″/day; true node {tn:.3}″; mean node {mn:.3}″, mean apogee {ma:.3}″; mean speeds {mns:.4}″/day, {mas:.4}″/day"
+    );
     assert!(speeds < 0.5, "speeds {speeds:.4}″/day");
     assert!(tn < 0.05, "true node {tn:.3}″");
     // The mean node is a convention: the Swiss Ephemeris' expression differs from Meeus's.
     assert!(mn < 0.3, "mean node {mn:.3}″");
+    // The mean apogee is the Swiss Ephemeris' too, projected onto the ecliptic; the remainder is
+    // a difference of conventions in the mean elements.
+    assert!(ma < 1.7, "mean apogee {ma:.3}″");
+    assert!(mns < 0.001, "mean node speed {mns:.4}″/day");
+    assert!(mas < 0.007, "mean apogee speed {mas:.4}″/day");
 }
 
 fn data(file: &str) -> Vec<Vec<String>> {

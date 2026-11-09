@@ -23,6 +23,7 @@ bodies = [
     ("Saturn", swe.SATURN),
     ("MeanNode", swe.MEAN_NODE),
     ("TrueNode", swe.TRUE_NODE),
+    ("MeanApogee", swe.MEAN_APOG),
 ]
 modes = [("jpl", swe.FLG_JPLEPH), ("swiss", swe.FLG_SWIEPH)]
 swe.set_ephe_path(ephe)
@@ -43,7 +44,7 @@ with open(out, "w") as f:
         for name, body in bodies:
             for jd in jds:
                 (lon, lat, dist, speed, _, _), ret = swe.calc(jd, body, flag | swe.FLG_SPEED)
-                if (ret & flag) != flag and body not in (swe.MEAN_NODE, swe.TRUE_NODE):
+                if (ret & flag) != flag and body not in (swe.MEAN_NODE, swe.TRUE_NODE, swe.MEAN_APOG):
                     sys.exit("%s %s at %s: fell back from %s (flags %#x)" % (mode, name, jd, mode, ret))
                 f.write("%s\t%s\t%.9f\t%.10f\t%.10f\t%.12f\t%.10f\n" % (mode, name, jd, lon, lat, dist, speed))
     f.write("# Swiss Ephemeris ΔT (TT - UT), seconds, on the first of each month at 0h UT\n")
