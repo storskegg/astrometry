@@ -30,6 +30,9 @@
 //!   the same instants, in its JPL (DE440) and own modes, and its ΔT. Made in a throwaway
 //!   Python environment under `target/`: the Swiss Ephemeris is AGPL-3.0, so only its numbers
 //!   come here, never its code.
+//! - `tests/data/swisseph/houses.tsv`: its house cusps (Placidus, Koch, Equal, Whole Sign)
+//!   on a grid of sidereal time, latitude and obliquity, its Fagan-Bradley and Lahiri
+//!   ayanamsas, and a few sidereal Sun and Moon longitudes.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -62,7 +65,7 @@ const BODIES: [(&str, &str); 13] = [
 /// A fixture: what makes it.
 type Part = fn() -> Result;
 
-const PARTS: [(&str, Part); 9] = [
+const PARTS: [(&str, Part); 10] = [
     ("deltat", deltat),
     ("usno", usno),
     ("leap-seconds", leap_seconds),
@@ -72,6 +75,7 @@ const PARTS: [(&str, Part); 9] = [
     ("sidereal", sidereal),
     ("rise-set", rise_set),
     ("swisseph", swisseph),
+    ("houses", houses),
 ];
 
 /// `cargo xtask fixtures [PART...]`: fetches the named fixtures, or every one.
@@ -105,6 +109,16 @@ fn jd(y: i32, m: i32, d: i32) -> f64 {
 /// The Swiss Ephemeris fixtures, by `fixtures/swisseph_fixtures.py` in a virtual environment
 /// under `target/`, with DE440 and the Swiss Ephemeris' own files downloaded there too.
 fn swisseph() -> Result {
+    swiss_run("swisseph_fixtures.py", "tests/data/swisseph/positions.tsv")
+}
+
+/// The Swiss Ephemeris' house cusps and ayanamsas, by `fixtures/swisseph_houses.py`.
+fn houses() -> Result {
+    swiss_run("swisseph_houses.py", "tests/data/swisseph/houses.tsv")
+}
+
+/// Runs a Swiss Ephemeris script from `fixtures/` in the virtual environment, writing `out`.
+fn swiss_run(script: &str, out: &str) -> Result {
     let work = root().join("target/swisseph");
     let ephe = work.join("ephe");
     fs::create_dir_all(&ephe).map_err(|e| e.to_string())?;
@@ -150,9 +164,9 @@ fn swisseph() -> Result {
     let instants_file = work.join("instants.txt");
     let list: Vec<String> = instants().iter().map(|jd| format!("{jd:.9}")).collect();
     fs::write(&instants_file, list.join("\n") + "\n").map_err(|e| e.to_string())?;
-    let out = root().join("tests/data/swisseph/positions.tsv");
+    let out = root().join(out);
     fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
-    let script = root().join("xtask/src/fixtures/swisseph_fixtures.py");
+    let script = root().join("xtask/src/fixtures").join(script);
     run_command(
         Command::new(&python)
             .args(["-I", "-B"])
