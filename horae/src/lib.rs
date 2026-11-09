@@ -83,6 +83,7 @@ macro_rules! named_enum {
 
 pub mod angles;
 pub mod aspect;
+pub mod chart;
 pub mod conditions;
 pub mod hours;
 pub mod moon;

@@ -148,6 +148,97 @@ fn enums_in_order() {
     );
 }
 
+#[test]
+fn chart_points_in_order() {
+    use horae::chart::Point;
+    let got = rows(&Point::ALL, |p| [p.name(), p.symbol(), "-"]);
+    assert_eq!(
+        got,
+        [
+            "Sun ☉ -",
+            "Moon ☽ -",
+            "Mercury ☿ -",
+            "Venus ♀ -",
+            "Mars ♂ -",
+            "Jupiter ♃ -",
+            "Saturn ♄ -",
+            "Uranus ♅ -",
+            "Neptune ♆ -",
+            "Pluto ♇ -",
+            "North Node ☊ -",
+            "South Node ☋ -",
+            "Mean North Node ☊ -",
+            "Mean South Node ☋ -",
+            "Lilith ⚸ -",
+            "Ascendant Asc -",
+            "Midheaven MC -",
+            "Descendant Dsc -",
+            "Imum Coeli IC -",
+        ]
+    );
+    // The shared points keep their symbols.
+    for p in horae::Point::ALL {
+        assert_eq!(Point::from(p).symbol(), p.symbol());
+    }
+}
+
+#[test]
+fn chart_kinds_in_order() {
+    use horae::chart::Kind;
+    let got: Vec<String> = Kind::ALL
+        .iter()
+        .map(|k| format!("{} {:.4} {}", k.name(), k.angle(), k.symbol()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "Conjunction 0.0000 ☌",
+            "Sextile 60.0000 ⚹",
+            "Square 90.0000 □",
+            "Trine 120.0000 △",
+            "Opposition 180.0000 ☍",
+            "Semi-sextile 30.0000 ⚺",
+            "Semi-square 45.0000 ∠",
+            "Sesquiquadrate 135.0000 ⚼",
+            "Quincunx 150.0000 ⚻",
+            "Quintile 72.0000 Q",
+            "Bi-quintile 144.0000 bQ",
+            "Septile 51.4286 S",
+            "Novile 40.0000 N",
+        ]
+    );
+    assert_eq!("semi-square".parse::<Kind>(), Ok(Kind::SemiSquare));
+    assert_eq!("BI-QUINTILE".parse::<Kind>(), Ok(Kind::BiQuintile));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn chart_json() {
+    use horae::chart::{Aspect, Kind, Point, Position};
+    let position = Position {
+        point: Point::ImumCoeli,
+        longitude: 12.5,
+        speed: -0.25,
+    };
+    assert_eq!(
+        serde_json::to_string(&position).unwrap(),
+        r#"{"point":"Imum Coeli","longitude":12.5,"speed":-0.25}"#
+    );
+    let aspect = Aspect {
+        points: [Point::Sun, Point::MeanNorthNode],
+        kind: Kind::SemiSquare,
+        orb: 0.5,
+        angle: 45.5,
+        applying: true,
+    };
+    let json = serde_json::to_string(&aspect).unwrap();
+    assert_eq!(
+        json,
+        r#"{"points":["Sun","Mean North Node"],"kind":"Semi-square","orb":0.5,"angle":45.5,"applying":true}"#
+    );
+    assert_eq!(serde_json::from_str::<Aspect>(&json).unwrap(), aspect);
+}
+
 /// The JSON shape of what astro-clock caches, reduced to its keys and kinds (each array to the
 /// union of its elements'), so new data leaves it alone and a changed field doesn't.
 #[cfg(feature = "serde")]
