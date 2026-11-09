@@ -51,8 +51,8 @@ println!("{:.5}° {:.5}°", sun.longitude, sun.latitude);
 dependency:
 
 ```toml
-astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v1.6.0" }
-horae = { git = "https://github.com/storskegg/astrometry", tag = "v1.6.0" }
+astrometry = { git = "https://github.com/storskegg/astrometry", tag = "v2026.46.0" }
+horae = { git = "https://github.com/storskegg/astrometry", tag = "v2026.46.0" }
 ```
 
 The two are versioned together and tagged once: take both at the same tag, or Cargo sees two
