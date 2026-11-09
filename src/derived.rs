@@ -3,7 +3,7 @@
 
 use crate::apparent::apparent;
 use crate::nutation::nutation;
-use crate::precession::gcrs_to_ecliptic_of_date;
+use crate::precession::{gcrs_to_ecliptic_of_date, gcrs_to_true_equator};
 use crate::source::{AU, Body, Source};
 use crate::spk;
 use crate::time::{centuries, tdb_minus_tt};
@@ -23,6 +23,33 @@ pub fn speed(src: &dyn Source, body: Body, tt: f64) -> Result<f64, spk::Error> {
     let a = apparent(src, body, tt - STEP)?.longitude;
     let b = apparent(src, body, tt + STEP)?.longitude;
     Ok(diff(b, a) / (2.0 * STEP))
+}
+
+/// The apparent declination of `body` at TT Julian date `tt`, degrees, north positive: the
+/// apparent direction (as [`apparent`] has it) on the true equator of date.
+pub fn declination(src: &dyn Source, body: Body, tt: f64) -> Result<f64, spk::Error> {
+    let d = apparent(src, body, tt)?.direction;
+    let z = gcrs_to_true_equator(tt).apply(d)[2];
+    Ok(z.clamp(-1.0, 1.0).asin().to_degrees())
+}
+
+/// The speed of `body`'s apparent declination at TT Julian date `tt`, degrees per day
+/// (central differences over [`STEP`]).
+pub fn declination_speed(src: &dyn Source, body: Body, tt: f64) -> Result<f64, spk::Error> {
+    let a = declination(src, body, tt - STEP)?;
+    let b = declination(src, body, tt + STEP)?;
+    Ok((b - a) / (2.0 * STEP))
+}
+
+/// The declination, degrees, of the point at ecliptic `longitude_deg` and `latitude_deg` for
+/// an obliquity of `obliquity_rad` radians: `sin δ = sin β cos ε + cos β sin ε sin λ`. For the
+/// points that have no ephemeris body, such as the nodes (latitude 0) and the angles.
+pub fn ecliptic_declination(longitude_deg: f64, latitude_deg: f64, obliquity_rad: f64) -> f64 {
+    let (l, b) = (longitude_deg.to_radians(), latitude_deg.to_radians());
+    (b.sin() * obliquity_rad.cos() + b.cos() * obliquity_rad.sin() * l.sin())
+        .clamp(-1.0, 1.0)
+        .asin()
+        .to_degrees()
 }
 
 /// The true node: the ascending node of the Moon's osculating geocentric orbit on the ecliptic
@@ -48,22 +75,42 @@ pub fn mean_node(tt: f64) -> f64 {
 /// The mean inclination of the Moon's orbit to the ecliptic, degrees.
 const MEAN_INCLINATION: f64 = 5.1453964;
 
+/// The mean elements of the Moon's orbit that locate the apogee, degrees: Meeus's mean
+/// perigee (Astronomical Algorithms, eq. 47.7) plus 180°, which is the apogee on the orbit,
+/// and the mean node, both at `t` Julian centuries from J2000.
+fn apogee_and_node(t: f64) -> (f64, f64) {
+    let perigee = 83.3532465 + 4069.0137287 * t - 0.0103200 * t * t - t.powi(3) / 80053.0
+        + t.powi(4) / 18999000.0;
+    let omega = 125.0445479 - 1934.1362891 * t + 0.0020754 * t * t + t.powi(3) / 467441.0
+        - t.powi(4) / 60616000.0;
+    (perigee + 180.0, omega)
+}
+
 /// The mean lunar apogee ("Black Moon Lilith"), from the true equinox, degrees: the apogee
 /// projected onto the ecliptic of date, as the Swiss Ephemeris gives it. The apogee on the orbit
 /// is Meeus's mean perigee (Astronomical Algorithms, eq. 47.7) plus 180°; its angle from the
 /// mean node is projected onto the ecliptic through [`MEAN_INCLINATION`], and the nutation in
 /// longitude is added.
 pub fn mean_apogee(tt: f64) -> f64 {
-    let t = centuries(tt);
-    let perigee = 83.3532465 + 4069.0137287 * t - 0.0103200 * t * t - t.powi(3) / 80053.0
-        + t.powi(4) / 18999000.0;
-    let omega = 125.0445479 - 1934.1362891 * t + 0.0020754 * t * t + t.powi(3) / 467441.0
-        - t.powi(4) / 60616000.0;
-    let u = (perigee + 180.0 - omega).to_radians();
+    let (apogee, omega) = apogee_and_node(centuries(tt));
+    let u = (apogee - omega).to_radians();
     let projected = (u.sin() * MEAN_INCLINATION.to_radians().cos())
         .atan2(u.cos())
         .to_degrees();
     (omega + projected + nutation(tt).0.to_degrees()).rem_euclid(360.0)
+}
+
+/// The ecliptic latitude of the mean lunar apogee, degrees: where the apogee on the orbit,
+/// at the angle `u` from the mean node, lies above the ecliptic, `sin β = sin u · sin i` for
+/// the mean inclination `i`. It is up to about 5.14°. The Swiss Ephemeris gives the mean
+/// apogee this latitude (its `MEAN_APOG` row), and [`mean_apogee`] is the longitude of the same
+/// point.
+pub fn mean_apogee_latitude(tt: f64) -> f64 {
+    let (apogee, omega) = apogee_and_node(centuries(tt));
+    let u = (apogee - omega).to_radians();
+    (u.sin() * MEAN_INCLINATION.to_radians().sin())
+        .asin()
+        .to_degrees()
 }
 
 /// The speed of the mean node, degrees per day (central differences over [`STEP`]).
