@@ -240,6 +240,53 @@ fn chart_json() {
 }
 
 #[test]
+fn parallel_kinds_in_order() {
+    use horae::chart::ParallelKind;
+    let got: Vec<String> = ParallelKind::ALL
+        .iter()
+        .map(|k| format!("{} {}", k.name(), k.symbol()))
+        .collect();
+    assert_eq!(got, ["Parallel ∥", "Contraparallel ⋕"]);
+    assert_eq!(
+        "contraparallel".parse::<ParallelKind>(),
+        Ok(ParallelKind::Contraparallel)
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn declination_and_parallel_json() {
+    use horae::chart::{Declination, Parallel, ParallelKind, Point};
+    let declination = Declination {
+        point: Point::Lilith,
+        declination: -23.5,
+        speed: 0.125,
+        out_of_bounds: true,
+    };
+    let json = serde_json::to_string(&declination).unwrap();
+    assert_eq!(
+        json,
+        r#"{"point":"Lilith","declination":-23.5,"speed":0.125,"out_of_bounds":true}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<Declination>(&json).unwrap(),
+        declination
+    );
+    let parallel = Parallel {
+        points: [Point::Sun, Point::Moon],
+        kind: ParallelKind::Contraparallel,
+        orb: 0.25,
+        applying: false,
+    };
+    let json = serde_json::to_string(&parallel).unwrap();
+    assert_eq!(
+        json,
+        r#"{"points":["Sun","Moon"],"kind":"Contraparallel","orb":0.25,"applying":false}"#
+    );
+    assert_eq!(serde_json::from_str::<Parallel>(&json).unwrap(), parallel);
+}
+
+#[test]
 fn house_systems_and_ayanamsas_in_order() {
     use horae::chart::{Ayanamsa, HouseSystem};
     let names: Vec<&str> = HouseSystem::ALL.iter().map(|s| s.name()).collect();

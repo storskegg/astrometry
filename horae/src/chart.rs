@@ -35,10 +35,47 @@
 //! let wide = |_: Point, _: Point, _: Kind| Some(6.0);
 //! assert_eq!(chart::aspects(&positions, &[Kind::Square], wide).len(), 1);
 //! ```
+//!
+//! # Declinations, parallels and out-of-bounds
+//!
+//! A point's declination is its angle north (positive) or south of the celestial equator.
+//! [`declinations`] gives it, with its daily motion, for the same [`Point`]s, and whether the
+//! point is out of bounds: farther from the equator than the Sun ever gets, which is to say
+//! beyond the true obliquity of the ecliptic of the date. The planets' declinations are
+//! apparent, as their longitudes are. The nodes and the angles are on the ecliptic, so theirs
+//! follow from their longitudes; Lilith has the latitude of the mean lunar apogee (up to
+//! about 5.14°), as the Swiss Ephemeris gives it.
+//!
+//! [`parallels`] finds the pairs in parallel (the same declination, on the same side of the
+//! equator) and in contraparallel (the same declination on opposite sides). As with aspects,
+//! horae has no default orbs: the app owns them, by a closure that may answer `None` to skip a
+//! pair and kind.
+//!
+//! ```
+//! use horae::chart::{self, Declination, ParallelKind, Point};
+//!
+//! let at = |point, declination| Declination {
+//!     point,
+//!     declination,
+//!     speed: 0.0,
+//!     out_of_bounds: false,
+//! };
+//! let declinations = [at(Point::Sun, 20.0), at(Point::Mars, -20.5), at(Point::Venus, 20.25)];
+//! let orb = |_: Point, _: Point, _: ParallelKind| Some(1.0);
+//! let found = chart::parallels(&declinations, &ParallelKind::ALL, orb);
+//! // Sun and Venus in parallel at 0.25°, Mars and Venus in contraparallel at 0.25°, and Sun
+//! // and Mars in contraparallel at 0.5°.
+//! assert_eq!(found.len(), 3);
+//! assert_eq!(found[0].kind, ParallelKind::Parallel);
+//! ```
 
 use std::fmt;
 
-use astrometry::derived::{diff, mean_apogee, mean_apogee_speed, mean_node, mean_node_speed};
+use astrometry::derived::{
+    STEP, declination as body_declination, declination_speed as body_declination_speed, diff,
+    ecliptic_declination, mean_apogee, mean_apogee_latitude, mean_apogee_speed, mean_node,
+    mean_node_speed, true_node,
+};
 use astrometry::source::{Body, Source};
 
 use crate::angles::angles;
@@ -104,6 +141,23 @@ impl Point {
             p if p.index() < 7 => Some(crate::Point::ALL[p.index()]),
             _ => None,
         }
+    }
+
+    /// The ephemeris body of a planet.
+    fn body(self) -> Option<Body> {
+        Some(match self {
+            Point::Sun => Body::Sun,
+            Point::Moon => Body::Moon,
+            Point::Mercury => Body::Mercury,
+            Point::Venus => Body::Venus,
+            Point::Mars => Body::Mars,
+            Point::Jupiter => Body::Jupiter,
+            Point::Saturn => Body::Saturn,
+            Point::Uranus => Body::Uranus,
+            Point::Neptune => Body::Neptune,
+            Point::Pluto => Body::Pluto,
+            _ => return None,
+        })
     }
 
     /// Whether `a` and `b` are always exactly opposite: an angle and its opposite, or a node
@@ -388,6 +442,191 @@ pub fn aspects(
                         orb: off,
                         angle: apart,
                         applying: (later - kind.angle()).abs() < off,
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|x, y| x.orb.total_cmp(&y.orb));
+    out
+}
+
+named_enum!(
+    /// A kind of parallel: two points at the same declination, or at opposite ones.
+    ParallelKind, "parallel", [
+        /// The same declination, on the same side of the equator.
+        Parallel => "Parallel",
+        /// The same distance from the equator, on opposite sides.
+        Contraparallel => "Contraparallel",
+    ]
+);
+
+impl ParallelKind {
+    /// The kind's symbol: ∥ for a parallel, ⋕ for a contraparallel (which has no standard
+    /// glyph; it is drawn as a parallel with a stroke across it, or by this sign).
+    pub fn symbol(self) -> &'static str {
+        ["∥", "⋕"][self as usize]
+    }
+}
+
+/// Where a point is north or south of the celestial equator, and its motion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Declination {
+    pub point: Point,
+    /// The declination, degrees, positive north.
+    pub declination: f64,
+    /// The daily motion in declination, degrees; negative is southward.
+    pub speed: f64,
+    /// Farther from the equator than the true obliquity of the ecliptic of the date: beyond
+    /// the Sun's greatest declination.
+    pub out_of_bounds: bool,
+}
+
+/// A parallel or contraparallel between two points of a chart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Parallel {
+    /// The two points, in the order given to [`parallels`].
+    pub points: [Point; 2],
+    pub kind: ParallelKind,
+    /// How far the points are from exact, degrees: the difference of the declinations for a
+    /// parallel, their sum for a contraparallel, without sign.
+    pub orb: f64,
+    /// Becoming exact, rather than separating.
+    pub applying: bool,
+}
+
+/// The declination of `point`, degrees, at TT Julian date `t`, for the points that aren't
+/// bodies of the ephemeris: the nodes and the angles (on the ecliptic, with latitude 0) and
+/// Lilith. The true nodes alone need the ephemeris.
+fn ecliptic_point_declination(
+    src: &dyn Source,
+    point: Point,
+    t: f64,
+    lat: f64,
+    lon: f64,
+) -> Result<f64, Error> {
+    let obliquity = astrometry::houses::ramc_and_obliquity(t, lon).1;
+    let on_ecliptic = |longitude: f64| ecliptic_declination(longitude, 0.0, obliquity);
+    // An opposite point is exactly the negative of its partner.
+    Ok(match point {
+        Point::NorthNode => on_ecliptic(true_node(src, t)?),
+        Point::SouthNode => -on_ecliptic(true_node(src, t)?),
+        Point::MeanNorthNode => on_ecliptic(mean_node(t)),
+        Point::MeanSouthNode => -on_ecliptic(mean_node(t)),
+        Point::Lilith => ecliptic_declination(mean_apogee(t), mean_apogee_latitude(t), obliquity),
+        Point::Ascendant => on_ecliptic(angles(t, lat, lon).ascendant),
+        Point::Descendant => -on_ecliptic(angles(t, lat, lon).ascendant),
+        Point::Midheaven => on_ecliptic(angles(t, lat, lon).midheaven),
+        Point::ImumCoeli => -on_ecliptic(angles(t, lat, lon).midheaven),
+        _ => unreachable!("{point} is a body of the ephemeris"),
+    })
+}
+
+/// The declinations of `points`, in that order, at TT Julian date `tt` at latitude `lat` and
+/// longitude `lon`, degrees, north and east positive.
+///
+/// The planets' are apparent, from the same direction as their longitudes, on the true equator
+/// of date; their speeds are central differences over 0.01 day either side. The nodes (true
+/// and mean) and the angles are on the ecliptic, with latitude 0, so their declinations follow
+/// from their longitudes and the true obliquity; the South Node's is the negative of the North
+/// Node's, and likewise for the Descendant and the IC. Lilith has the latitude of the mean
+/// apogee ([`astrometry::derived::mean_apogee_latitude`]). The speeds of the nodes and Lilith
+/// are central differences over 0.01 day either side, and the angles' over a minute, as their
+/// longitudes' are.
+///
+/// A point is out of bounds if its declination is beyond the true obliquity of the date, in
+/// either direction. Only the planets and the true nodes need the ephemeris. A point that
+/// isn't [`Point::available`] gives [`Error::Unavailable`], the first such in `points`.
+pub fn declinations(
+    src: &dyn Source,
+    tt: f64,
+    lat: f64,
+    lon: f64,
+    points: &[Point],
+) -> Result<Vec<Declination>, Error> {
+    check_coordinates(lat, lon)?;
+    if let Some(&p) = points.iter().find(|p| !p.available()) {
+        return Err(Error::Unavailable(p));
+    }
+    let bound = astrometry::houses::ramc_and_obliquity(tt, lon)
+        .1
+        .to_degrees();
+    points
+        .iter()
+        .map(|&point| {
+            let (declination, speed) = if let Some(body) = point.body() {
+                (
+                    body_declination(src, body, tt)?,
+                    body_declination_speed(src, body, tt)?,
+                )
+            } else {
+                let step = match point {
+                    Point::Ascendant | Point::Descendant | Point::Midheaven | Point::ImumCoeli => {
+                        ANGLE_STEP
+                    }
+                    _ => STEP,
+                };
+                let at = |t| ecliptic_point_declination(src, point, t, lat, lon);
+                (at(tt)?, (at(tt + step)? - at(tt - step)?) / (2.0 * step))
+            };
+            Ok(Declination {
+                point,
+                declination,
+                speed,
+                out_of_bounds: declination.abs() > bound,
+            })
+        })
+        .collect()
+}
+
+/// The parallels and contraparallels among `declinations` of the given `kinds`, closest to
+/// exact first.
+///
+/// Every pair `i < j` is checked, in order, so a result's `points` are
+/// `[declinations[i].point, declinations[j].point]`, for every kind in `kinds`. A parallel is
+/// a difference of the declinations of at most `orb` degrees; a contraparallel is a sum of at
+/// most `orb`. `orb` gives it for the two points and the kind; `None` skips them. horae has no
+/// default orbs: the app owns them. A pair can match both kinds when the orb is wide enough
+/// (both near the equator), and both are returned.
+///
+/// Pairs that are always exactly opposite, and so always in contraparallel, are never checked:
+/// the Ascendant and Descendant, the Midheaven and Imum Coeli, the North and South Nodes, and
+/// the Mean North and South Nodes.
+///
+/// A parallel is applying if the points' motion over a minute brings it closer to exact. One
+/// that is exact and not moving isn't. Ties keep the order of the pairs.
+pub fn parallels(
+    declinations: &[Declination],
+    kinds: &[ParallelKind],
+    orb: impl Fn(Point, Point, ParallelKind) -> Option<f64>,
+) -> Vec<Parallel> {
+    let mut out = Vec::new();
+    for (i, a) in declinations.iter().enumerate() {
+        for b in &declinations[i + 1..] {
+            if Point::fixed_pair(a.point, b.point) {
+                continue;
+            }
+            let (a2, b2) = (
+                a.declination + a.speed * ANGLE_STEP,
+                b.declination + b.speed * ANGLE_STEP,
+            );
+            for &kind in kinds {
+                let Some(limit) = orb(a.point, b.point, kind) else {
+                    continue;
+                };
+                let off = |x: f64, y: f64| match kind {
+                    ParallelKind::Parallel => (x - y).abs(),
+                    ParallelKind::Contraparallel => (x + y).abs(),
+                };
+                let now = off(a.declination, b.declination);
+                if now <= limit {
+                    out.push(Parallel {
+                        points: [a.point, b.point],
+                        kind,
+                        orb: now,
+                        applying: off(a2, b2) < now,
                     });
                 }
             }
@@ -921,6 +1160,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got.len(), 4);
+        // Nor do their declinations.
+        let points = [Point::Midheaven, Point::MeanSouthNode, Point::Lilith];
+        assert_eq!(
+            declinations(&Never, TT, 10.0, 20.0, &points).unwrap().len(),
+            3
+        );
     }
 
     #[test]
@@ -1009,5 +1254,376 @@ mod tests {
             assert_eq!(Kind::from(k).angle(), k.angle());
             assert_eq!(Kind::from(k).symbol(), k.symbol());
         }
+    }
+}
+
+#[cfg(test)]
+mod declination_tests {
+    use super::*;
+    use astrometry::houses::ramc_and_obliquity;
+    use astrometry::source::Builtin;
+
+    const TT: f64 = 2461328.25;
+
+    fn dec(point: Point, declination: f64, speed: f64) -> Declination {
+        Declination {
+            point,
+            declination,
+            speed,
+            out_of_bounds: false,
+        }
+    }
+
+    fn flat(orb: f64) -> impl Fn(Point, Point, ParallelKind) -> Option<f64> {
+        move |_, _, _| Some(orb)
+    }
+
+    #[test]
+    fn parallel_and_contraparallel() {
+        let d = [
+            dec(Point::Sun, 10.0, 0.0),
+            dec(Point::Mars, 10.4, 0.0),
+            dec(Point::Venus, -10.3, 0.0),
+            dec(Point::Moon, 25.0, 0.0),
+        ];
+        let got = parallels(&d, &ParallelKind::ALL, flat(0.5));
+        let seen: Vec<_> = got.iter().map(|p| (p.points, p.kind)).collect();
+        // Closest first: Mars and Venus 0.1° from a contraparallel, the Sun and Venus 0.3°, and
+        // the Sun and Mars 0.4° from a parallel. The Moon is in neither.
+        assert_eq!(
+            seen,
+            [
+                ([Point::Mars, Point::Venus], ParallelKind::Contraparallel),
+                ([Point::Sun, Point::Venus], ParallelKind::Contraparallel),
+                ([Point::Sun, Point::Mars], ParallelKind::Parallel),
+            ]
+        );
+        for (p, want) in got.iter().zip([0.1, 0.3, 0.4]) {
+            assert!((p.orb - want).abs() < 1e-12, "{} vs {want}", p.orb);
+        }
+        // Only the kinds asked for.
+        let only = parallels(&d, &[ParallelKind::Parallel], flat(0.5));
+        assert_eq!(only.len(), 1);
+        assert_eq!(only[0].points, [Point::Sun, Point::Mars]);
+        // The limit is inclusive (the values are exact in binary).
+        let exact = [dec(Point::Sun, 8.0, 0.0), dec(Point::Mars, 8.5, 0.0)];
+        assert_eq!(
+            parallels(&exact, &[ParallelKind::Parallel], flat(0.5)).len(),
+            1
+        );
+        assert!(parallels(&exact, &[ParallelKind::Parallel], flat(0.49)).is_empty());
+    }
+
+    #[test]
+    fn pair_orb_and_none() {
+        let d = [
+            dec(Point::Sun, 10.0, 0.0),
+            dec(Point::Mars, 10.4, 0.0),
+            dec(Point::Venus, 10.2, 0.0),
+        ];
+        // The Sun and Mars get a tighter orb than the rest; Venus and Mars are skipped.
+        let orb = |a: Point, b: Point, _: ParallelKind| match (a, b) {
+            (Point::Sun, Point::Mars) => Some(0.3),
+            (Point::Mars, Point::Venus) => None,
+            _ => Some(0.5),
+        };
+        let got = parallels(&d, &[ParallelKind::Parallel], orb);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].points, [Point::Sun, Point::Venus]);
+        // A kind can be skipped without the other.
+        let kind_orb = |_: Point, _: Point, k: ParallelKind| {
+            (k == ParallelKind::Contraparallel).then_some(30.0)
+        };
+        let got = parallels(&d, &ParallelKind::ALL, kind_orb);
+        // All three pairs sum to about 20°: within 30°, but only as contraparallels.
+        assert_eq!(got.len(), 3);
+        assert!(got.iter().all(|p| p.kind == ParallelKind::Contraparallel));
+    }
+
+    #[test]
+    fn fixed_pairs_skipped() {
+        use Point::*;
+        // Each opposite pair is exactly in contraparallel; none is reported, in either order.
+        let d = [
+            dec(Ascendant, 12.0, 0.0),
+            dec(Descendant, -12.0, 0.0),
+            dec(Midheaven, 5.0, 0.0),
+            dec(ImumCoeli, -5.0, 0.0),
+            dec(NorthNode, 3.0, 0.0),
+            dec(SouthNode, -3.0, 0.0),
+            dec(MeanNorthNode, 4.0, 0.0),
+            dec(MeanSouthNode, -4.0, 0.0),
+        ];
+        assert!(parallels(&d, &ParallelKind::ALL, flat(0.5)).is_empty());
+        let mut r = d;
+        r.reverse();
+        assert!(parallels(&r, &ParallelKind::ALL, flat(0.5)).is_empty());
+        // The true and mean nodes aren't each other's pair.
+        let nodes = [dec(NorthNode, 3.0, 0.0), dec(MeanSouthNode, -3.1, 0.0)];
+        assert_eq!(parallels(&nodes, &ParallelKind::ALL, flat(0.5)).len(), 1);
+    }
+
+    #[test]
+    fn applying_and_separating() {
+        let kind = [ParallelKind::Parallel];
+        // 0.5° apart; the second falls 1°/day, or rises, toward or from the first.
+        let apply = [dec(Point::Sun, 10.0, 0.0), dec(Point::Mars, 10.5, -1.0)];
+        let sep = [dec(Point::Sun, 10.0, 0.0), dec(Point::Mars, 10.5, 1.0)];
+        assert!(parallels(&apply, &kind, flat(1.0))[0].applying);
+        assert!(!parallels(&sep, &kind, flat(1.0))[0].applying);
+        // Exact and still: not applying.
+        let still = [dec(Point::Sun, 10.0, 0.0), dec(Point::Mars, 10.0, 0.0)];
+        assert!(!parallels(&still, &kind, flat(1.0))[0].applying);
+        // For a contraparallel the sum is what shrinks: 10 and −10.5, the second rising.
+        let con = [dec(Point::Sun, 10.0, 0.0), dec(Point::Mars, -10.5, 1.0)];
+        let con_kind = [ParallelKind::Contraparallel];
+        assert!(parallels(&con, &con_kind, flat(1.0))[0].applying);
+        let con = [dec(Point::Sun, 10.0, 0.0), dec(Point::Mars, -10.5, -1.0)];
+        assert!(!parallels(&con, &con_kind, flat(1.0))[0].applying);
+    }
+
+    #[test]
+    fn sorted_and_stable() {
+        let d = [
+            dec(Point::Sun, 10.0, 0.0),
+            dec(Point::Moon, 10.3, 0.0),
+            dec(Point::Mars, 10.1, 0.0),
+            dec(Point::Venus, 10.3, 0.0),
+        ];
+        let got = parallels(&d, &[ParallelKind::Parallel], flat(1.0));
+        let orbs: Vec<f64> = got.iter().map(|p| p.orb).collect();
+        assert!(orbs.windows(2).all(|w| w[0] <= w[1]), "{orbs:?}");
+        // Moon and Venus are exact; ties keep the order of the pairs (Sun–Mars 0.1 and
+        // Moon–Mars 0.2 and Mars–Venus 0.2 both).
+        assert_eq!(got[0].points, [Point::Moon, Point::Venus]);
+        let tied: Vec<_> = got
+            .iter()
+            .filter(|p| (p.orb - 0.2).abs() < 1e-9)
+            .map(|p| p.points)
+            .collect();
+        assert_eq!(
+            tied,
+            [[Point::Moon, Point::Mars], [Point::Mars, Point::Venus]]
+        );
+    }
+
+    // The Sun's declination in October is about −8°; the planets are the ephemeris' own.
+    #[test]
+    fn planets_are_the_ephemerides_own() {
+        let got = declinations(&Builtin, TT, 43.07, -89.4, &[Point::Moon, Point::Sun]).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].point, Point::Moon);
+        assert_eq!(got[1].point, Point::Sun);
+        assert!((-9.0..-7.0).contains(&got[1].declination), "{got:?}");
+        assert!(got[1].speed < 0.0 && got[1].speed > -0.5);
+        assert!(!got[1].out_of_bounds);
+        for d in &got {
+            let b = d.point.body().unwrap();
+            assert_eq!(
+                d.declination,
+                astrometry::derived::declination(&Builtin, b, TT).unwrap()
+            );
+            assert_eq!(
+                d.speed,
+                astrometry::derived::declination_speed(&Builtin, b, TT).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn order_preserved() {
+        use Point::*;
+        let asked = [
+            Ascendant,
+            Saturn,
+            Lilith,
+            Sun,
+            MeanSouthNode,
+            Moon,
+            NorthNode,
+        ];
+        let got = declinations(&Builtin, TT, 10.0, 20.0, &asked).unwrap();
+        let points: Vec<Point> = got.iter().map(|d| d.point).collect();
+        assert_eq!(points, asked);
+        // A point asked twice is given twice.
+        assert_eq!(
+            declinations(&Builtin, TT, 10.0, 20.0, &[Sun, Sun])
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn opposites_are_opposite() {
+        use Point::*;
+        let pairs = [
+            (Ascendant, Descendant),
+            (Midheaven, ImumCoeli),
+            (NorthNode, SouthNode),
+            (MeanNorthNode, MeanSouthNode),
+        ];
+        let all: Vec<Point> = pairs.iter().flat_map(|&(a, b)| [a, b]).collect();
+        let got = declinations(&Builtin, TT, 43.07, -89.4, &all).unwrap();
+        for (i, _) in pairs.iter().enumerate() {
+            let (a, b) = (got[2 * i], got[2 * i + 1]);
+            assert_eq!(a.declination, -b.declination, "{:?}", a.point);
+            assert_eq!(a.speed, -b.speed, "{:?}", a.point);
+            assert_eq!(a.out_of_bounds, b.out_of_bounds);
+            assert!(a.declination != 0.0 && a.speed != 0.0);
+        }
+    }
+
+    // The nodes and angles are on the ecliptic: their declinations are their longitudes'.
+    #[test]
+    fn ecliptic_points_follow_their_longitudes() {
+        use Point::*;
+        let (lat, lon) = (43.07, -89.4);
+        let eps = ramc_and_obliquity(TT, lon).1;
+        let all = [NorthNode, MeanNorthNode, Ascendant, Midheaven, Descendant];
+        let d = declinations(&Builtin, TT, lat, lon, &all).unwrap();
+        let p = positions(&Builtin, TT, lat, lon, &all).unwrap();
+        for (d, p) in d.iter().zip(&p) {
+            let want = ecliptic_declination(p.longitude, 0.0, eps);
+            assert!(
+                (d.declination - want).abs() < 1e-9,
+                "{:?}: {} vs {want}",
+                d.point,
+                d.declination
+            );
+            // A speed in declination is a speed in longitude scaled by the slope of the
+            // ecliptic to the equator, at most 1 (when the ecliptic runs along the equator).
+            assert!(
+                d.speed.abs() <= p.speed.abs() * 1.0001 + 1e-9,
+                "{d:?} {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lilith_has_the_apogees_latitude() {
+        let eps = ramc_and_obliquity(TT, 0.0).1;
+        let d = declinations(&Builtin, TT, 0.0, 0.0, &[Point::Lilith]).unwrap()[0];
+        let want = ecliptic_declination(mean_apogee(TT), mean_apogee_latitude(TT), eps);
+        assert_eq!(d.declination, want);
+        assert!(
+            mean_apogee_latitude(TT).abs() > 0.1,
+            "a latitude of its own"
+        );
+        assert!(d.speed.abs() > 0.0 && d.speed.abs() < 1.0);
+    }
+
+    // Lilith's latitude takes it past the obliquity: bisect for the date where it crosses,
+    // and take the flag a hair either side.
+    #[test]
+    fn out_of_bounds_either_side_of_the_obliquity() {
+        let lilith = |t: f64| declinations(&Builtin, t, 0.0, 0.0, &[Point::Lilith]).unwrap()[0];
+        let margin = |t: f64| {
+            let d = lilith(t);
+            d.declination.abs() - ramc_and_obliquity(t, 0.0).1.to_degrees()
+        };
+        // Scan two of the apogee's 8.85-year cycles, every three days, for a crossing of the
+        // bound in either direction, then bisect to it.
+        let outside = |t: f64| margin(t) > 0.0;
+        let mut t = TT;
+        while outside(t) == outside(t + 3.0) {
+            t += 3.0;
+            assert!(t < TT + 6500.0, "no crossing");
+        }
+        let (mut lo, mut hi) = (t, t + 3.0);
+        let before = outside(lo);
+        for _ in 0..60 {
+            let mid = (lo + hi) / 2.0;
+            if outside(mid) == before {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        // A hair either side, a millionth of a day: Lilith moves less than a degree a day.
+        let (early, late) = (lilith(lo - 1e-6), lilith(hi + 1e-6));
+        assert_eq!(early.out_of_bounds, before, "{early:?}");
+        assert_eq!(late.out_of_bounds, !before, "{late:?}");
+        let eps = ramc_and_obliquity(hi, 0.0).1.to_degrees();
+        assert!((early.declination.abs() - eps).abs() < 1e-4);
+        assert!((late.declination.abs() - eps).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_sun_is_never_out_of_bounds() {
+        // Around a solstice the Sun's declination reaches the obliquity, no more.
+        for k in 0..14 {
+            let t = 2461212.0 + f64::from(k) * 0.25; // the solstice of 2026-06-21, about
+            let d = declinations(&Builtin, t, 0.0, 0.0, &[Point::Sun]).unwrap()[0];
+            assert!(!d.out_of_bounds, "{d:?}");
+            assert!(d.declination > 23.4, "{d:?}");
+        }
+    }
+
+    #[test]
+    fn needs_no_ephemeris() {
+        use astrometry::source::Body;
+        use astrometry::vector::Vec3;
+        struct Never;
+        impl Source for Never {
+            fn state(&self, _: Body, _: f64) -> Result<(Vec3, Vec3), EphemerisError> {
+                panic!("touched the ephemeris")
+            }
+        }
+        use Point::*;
+        let got = declinations(
+            &Never,
+            TT,
+            10.0,
+            20.0,
+            &[
+                Ascendant,
+                Midheaven,
+                Descendant,
+                ImumCoeli,
+                MeanNorthNode,
+                MeanSouthNode,
+                Lilith,
+            ],
+        )
+        .unwrap();
+        assert_eq!(got.len(), 7);
+    }
+
+    #[test]
+    fn errors() {
+        #[cfg(not(feature = "outer-planets"))]
+        {
+            let e = declinations(
+                &Builtin,
+                TT,
+                0.0,
+                0.0,
+                &[Point::Sun, Point::Neptune, Point::Pluto],
+            )
+            .unwrap_err();
+            assert!(matches!(e, Error::Unavailable(Point::Neptune)));
+        }
+        let e = declinations(&Builtin, TT, 0.0, 181.0, &[Point::Sun]).unwrap_err();
+        assert!(matches!(
+            e,
+            Error::Horae(crate::Error::InvalidCoordinates(..))
+        ));
+        // The coordinates are checked first.
+        #[cfg(not(feature = "outer-planets"))]
+        {
+            let e = declinations(&Builtin, TT, 99.0, 0.0, &[Point::Pluto]).unwrap_err();
+            assert!(matches!(e, Error::Horae(_)));
+        }
+    }
+
+    #[test]
+    fn parallel_kinds() {
+        assert_eq!(ParallelKind::Parallel.symbol(), "∥");
+        assert_eq!(ParallelKind::Contraparallel.symbol(), "⋕");
+        assert_eq!(
+            "contraparallel".parse::<ParallelKind>(),
+            Ok(ParallelKind::Contraparallel)
+        );
     }
 }
