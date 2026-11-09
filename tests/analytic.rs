@@ -60,7 +60,7 @@ fn apparent_against_de440() {
             Body::Mars => (1.1, 0.06),
             Body::Jupiter => (0.75, 0.11),
             Body::Saturn => (0.45, 0.04),
-            Body::Earth => unreachable!(),
+            Body::Earth | Body::Uranus | Body::Neptune | Body::Pluto => unreachable!(),
         };
         assert!(
             lon < max_lon && lat < max_lat,

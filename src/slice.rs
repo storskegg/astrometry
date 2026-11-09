@@ -459,7 +459,11 @@ mod tests {
         let segs = decode(include_bytes!("../data/de440-outer-1800-2200.bin")).unwrap();
         let targets: Vec<_> = segs.iter().map(|s| (s.target, s.center)).collect();
         assert_eq!(targets, [(7, 0), (8, 0), (9, 0)]);
-        assert_eq!(segs[0].span(), moon(&built()).span());
+        // The same 1800–2200, to within a record (the Moon's are shorter than theirs).
+        let (start, end) = segs[0].span();
+        let (moon_start, moon_end) = moon(&built()).span();
+        assert!(start <= moon_start + 1.0 && start >= moon_start - 32.0);
+        assert!((end - moon_end).abs() < 64.0, "{end} {moon_end}");
         for t in 7..=9 {
             assert!(outer_segment(t, 0).is_some());
         }
