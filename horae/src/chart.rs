@@ -218,6 +218,16 @@ pub enum Error {
     Horae(crate::Error),
     /// A point this release can't give: see [`Point::available`].
     Unavailable(Point),
+    /// A house system that doesn't exist this far from the equator: Placidus and Koch need the
+    /// latitude to be inside the polar circle, `limit` degrees, the complement of the obliquity.
+    Polar {
+        /// The latitude asked for, degrees.
+        latitude: f64,
+        /// The latitude it must be inside, degrees.
+        limit: f64,
+        /// The house system asked for.
+        system: HouseSystem,
+    },
 }
 
 impl fmt::Display for Error {
@@ -225,6 +235,15 @@ impl fmt::Display for Error {
         match self {
             Error::Horae(e) => e.fmt(f),
             Error::Unavailable(p) => write!(f, "horae: {} isn't available in this build", p.name()),
+            Error::Polar {
+                latitude,
+                limit,
+                system,
+            } => write!(
+                f,
+                "horae: {} houses aren't defined at latitude {latitude}°, beyond {limit:.2}°",
+                system.name()
+            ),
         }
     }
 }
@@ -233,7 +252,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Horae(e) => Some(e),
-            Error::Unavailable(_) => None,
+            Error::Unavailable(_) | Error::Polar { .. } => None,
         }
     }
 }
@@ -376,6 +395,300 @@ pub fn aspects(
     }
     out.sort_by(|x, y| x.orb.total_cmp(&y.orb));
     out
+}
+
+named_enum!(
+    /// A way of dividing the sky into twelve houses.
+    HouseSystem, "house system", [
+        WholeSign => "Whole Sign", Equal => "Equal", Placidus => "Placidus", Koch => "Koch",
+    ]
+);
+
+named_enum!(
+    /// A sidereal zodiac, by its ayanamsa: the distance of its 0° from the tropical 0°.
+    Ayanamsa, "ayanamsa", [
+        FaganBradley => "Fagan-Bradley", Lahiri => "Lahiri",
+    ]
+);
+
+// By hand: `named_enum!` doesn't derive `Default`.
+#[allow(clippy::derivable_impls)]
+impl Default for Ayanamsa {
+    fn default() -> Ayanamsa {
+        Ayanamsa::FaganBradley
+    }
+}
+
+impl Ayanamsa {
+    /// The ayanamsa at TT Julian date `tt`, degrees. It includes the nutation in longitude, so
+    /// a sidereal longitude is the apparent tropical longitude minus it.
+    pub fn at(self, tt: f64) -> f64 {
+        match self {
+            Ayanamsa::FaganBradley => astrometry::ayanamsa::fagan_bradley(tt),
+            Ayanamsa::Lahiri => astrometry::ayanamsa::lahiri(tt),
+        }
+    }
+}
+
+/// The zodiac longitudes are measured in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Zodiac {
+    /// From the equinox of date.
+    #[default]
+    Tropical,
+    /// From a point fixed among the stars, as set by the ayanamsa.
+    Sidereal(Ayanamsa),
+}
+
+/// The twelve houses of a chart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Houses {
+    pub system: HouseSystem,
+    /// The cusps, degrees 0–360 in the chosen zodiac; index 0 is the 1st house.
+    pub cusps: [f64; 12],
+}
+
+impl Houses {
+    /// The house, 1–12, that `longitude` (degrees, in the same zodiac) falls in: the one whose
+    /// cusp is the last at or before it, going forward through the zodiac.
+    pub fn house_of(&self, longitude: f64) -> u8 {
+        let mut best = (f64::INFINITY, 0);
+        for (i, cusp) in self.cusps.iter().enumerate() {
+            let past = (longitude - cusp).rem_euclid(360.0);
+            if past < best.0 {
+                best = (past, i);
+            }
+        }
+        best.1 as u8 + 1
+    }
+}
+
+/// The house cusps at TT Julian date `tt`, at latitude `lat` and longitude `lon`, degrees,
+/// north and east positive, in `zodiac`. No ephemeris is needed.
+///
+/// Cusps 1, 4, 7 and 10 of Placidus and Koch are the Ascendant, Imum Coeli, Descendant and
+/// Midheaven of [`positions`]. Whole Sign and Equal work at every valid latitude, as far as
+/// the Ascendant does (see [`crate::angles`]); Placidus and Koch are defined only inside the
+/// polar circle, where the latitude is less than 90° minus the obliquity, about 66.56°, and
+/// give [`Error::Polar`] beyond.
+///
+/// In the sidereal zodiac the ayanamsa is taken from the cusps; Whole Sign houses are the
+/// signs of the *sidereal* Ascendant's, from 0° of its sign.
+pub fn houses(
+    tt: f64,
+    lat: f64,
+    lon: f64,
+    system: HouseSystem,
+    zodiac: Zodiac,
+) -> Result<Houses, Error> {
+    use astrometry::houses as h;
+    check_coordinates(lat, lon)?;
+    let shift = match zodiac {
+        Zodiac::Tropical => 0.0,
+        Zodiac::Sidereal(a) => a.at(tt),
+    };
+    let (ramc, obliquity) = h::ramc_and_obliquity(tt, lon);
+    let latitude = lat.to_radians();
+    let ascendant = astrometry::angles::from_ramc(ramc, obliquity, latitude).ascendant;
+    let cusps = match system {
+        HouseSystem::WholeSign => Some(h::whole_sign((ascendant - shift).rem_euclid(360.0))),
+        HouseSystem::Equal => Some(h::equal(ascendant)),
+        HouseSystem::Placidus => h::placidus(ramc, obliquity, latitude),
+        HouseSystem::Koch => h::koch(ramc, obliquity, latitude),
+    };
+    let Some(mut cusps) = cusps else {
+        return Err(Error::Polar {
+            latitude: lat,
+            limit: h::polar_limit(obliquity),
+            system,
+        });
+    };
+    if system != HouseSystem::WholeSign {
+        for c in &mut cusps {
+            *c = (*c - shift).rem_euclid(360.0);
+        }
+    }
+    Ok(Houses { system, cusps })
+}
+
+#[cfg(test)]
+mod houses_tests {
+    use super::*;
+    use astrometry::source::Builtin;
+
+    const TT: f64 = 2461328.25;
+    const PLACE: (f64, f64) = (43.07, -89.4);
+
+    fn cast(system: HouseSystem, zodiac: Zodiac) -> Houses {
+        houses(TT, PLACE.0, PLACE.1, system, zodiac).unwrap()
+    }
+
+    #[test]
+    fn angles_are_the_charts() {
+        use Point::*;
+        let got = positions(
+            &Builtin,
+            TT,
+            PLACE.0,
+            PLACE.1,
+            &[Ascendant, ImumCoeli, Descendant, Midheaven],
+        )
+        .unwrap();
+        for system in [HouseSystem::Placidus, HouseSystem::Koch] {
+            let h = cast(system, Zodiac::Tropical);
+            for (cusp, p) in [0, 3, 6, 9].into_iter().zip([0, 1, 2, 3]) {
+                assert_eq!(
+                    h.cusps[cusp],
+                    got[p].longitude,
+                    "{system} cusp {}",
+                    cusp + 1
+                );
+            }
+        }
+        let e = cast(HouseSystem::Equal, Zodiac::Tropical);
+        assert_eq!(e.cusps[0], got[0].longitude);
+    }
+
+    #[test]
+    fn systems_are_ordered_and_equal_spaced() {
+        for system in HouseSystem::ALL {
+            let h = cast(system, Zodiac::Tropical);
+            assert_eq!(h.system, system);
+            let mut total = 0.0;
+            for i in 0..12 {
+                let step = (h.cusps[(i + 1) % 12] - h.cusps[i]).rem_euclid(360.0);
+                assert!(
+                    step > 0.0 && step < 90.0,
+                    "{system} house {}: {step}",
+                    i + 1
+                );
+                total += step;
+                if matches!(system, HouseSystem::Equal | HouseSystem::WholeSign) {
+                    assert!((step - 30.0).abs() < 1e-9);
+                }
+            }
+            assert!((total - 360.0).abs() < 1e-9);
+        }
+        let w = cast(HouseSystem::WholeSign, Zodiac::Tropical);
+        assert!(w.cusps.iter().all(|c| c % 30.0 == 0.0));
+    }
+
+    #[test]
+    fn house_of_with_wrap() {
+        let h = Houses {
+            system: HouseSystem::Equal,
+            cusps: std::array::from_fn(|i| (345.0 + 30.0 * i as f64) % 360.0),
+        };
+        // The 1st house runs from 345° to 15°.
+        assert_eq!(h.house_of(345.0), 1);
+        assert_eq!(h.house_of(359.9), 1);
+        assert_eq!(h.house_of(0.0), 1);
+        assert_eq!(h.house_of(14.99), 1);
+        assert_eq!(h.house_of(15.0), 2);
+        assert_eq!(h.house_of(344.99), 12);
+        assert_eq!(h.house_of(-10.0), 1);
+        let p = cast(HouseSystem::Placidus, Zodiac::Tropical);
+        for i in 0..12 {
+            assert_eq!(p.house_of(p.cusps[i]), i as u8 + 1);
+            assert_eq!(p.house_of(p.cusps[i] + 0.001), i as u8 + 1);
+        }
+    }
+
+    #[test]
+    fn sidereal_shift() {
+        let aya = Ayanamsa::Lahiri;
+        for system in [HouseSystem::Equal, HouseSystem::Placidus, HouseSystem::Koch] {
+            let t = cast(system, Zodiac::Tropical);
+            let s = cast(system, Zodiac::Sidereal(aya));
+            for i in 0..12 {
+                let d = (t.cusps[i] - s.cusps[i]).rem_euclid(360.0);
+                assert!((d - aya.at(TT)).abs() < 1e-9, "{system} cusp {}", i + 1);
+            }
+        }
+        // Whole Sign: the sign of the sidereal Ascendant, not the tropical one's.
+        let t = cast(HouseSystem::Equal, Zodiac::Tropical).cusps[0];
+        let s = cast(HouseSystem::Equal, Zodiac::Sidereal(aya)).cusps[0];
+        let w = cast(HouseSystem::WholeSign, Zodiac::Sidereal(aya));
+        assert_eq!(w.cusps[0], (s / 30.0).floor() * 30.0);
+        assert!(aya.at(TT) > 20.0 && t != s);
+        assert_eq!(w.cusps[0] % 30.0, 0.0);
+    }
+
+    #[test]
+    fn sidereal_whole_sign_crosses_a_sign() {
+        // Over a day the Ascendant passes every sign: find a moment where the tropical and
+        // sidereal signs differ, and check the sidereal one is the sidereal Ascendant's.
+        let mut differed = false;
+        for k in 0..48 {
+            let tt = TT + f64::from(k) / 48.0;
+            let z = Zodiac::Sidereal(Ayanamsa::FaganBradley);
+            let (t, s) = (
+                houses(tt, 40.0, 0.0, HouseSystem::WholeSign, Zodiac::Tropical).unwrap(),
+                houses(tt, 40.0, 0.0, HouseSystem::WholeSign, z).unwrap(),
+            );
+            let sid_asc = houses(tt, 40.0, 0.0, HouseSystem::Equal, z).unwrap().cusps[0];
+            assert_eq!(s.cusps[0], (sid_asc / 30.0).floor() * 30.0);
+            differed |= t.cusps[0] != s.cusps[0];
+        }
+        assert!(differed);
+    }
+
+    #[test]
+    fn polar_errors() {
+        for system in [HouseSystem::Placidus, HouseSystem::Koch] {
+            assert!(houses(TT, 66.0, 0.0, system, Zodiac::Tropical).is_ok());
+            for lat in [67.0, -67.0] {
+                let e = houses(TT, lat, 0.0, system, Zodiac::Tropical).unwrap_err();
+                let Error::Polar {
+                    latitude, limit, ..
+                } = e
+                else {
+                    panic!("{e:?}")
+                };
+                assert_eq!(latitude, lat);
+                assert!((limit - 66.56).abs() < 0.01);
+                assert_eq!(
+                    e.to_string(),
+                    format!(
+                        "horae: {system} houses aren't defined at latitude {lat}°, beyond 66.56°"
+                    )
+                );
+            }
+        }
+        for system in [HouseSystem::Equal, HouseSystem::WholeSign] {
+            let h = houses(TT, 80.0, 0.0, system, Zodiac::Tropical).unwrap();
+            assert!(h.cusps.iter().all(|c| (0.0..360.0).contains(c)));
+        }
+    }
+
+    #[test]
+    fn bad_coordinates() {
+        for (lat, lon) in [(91.0, 0.0), (0.0, 181.0), (f64::NAN, 0.0)] {
+            let e = houses(TT, lat, lon, HouseSystem::Koch, Zodiac::Tropical).unwrap_err();
+            assert!(matches!(
+                e,
+                Error::Horae(crate::Error::InvalidCoordinates(..))
+            ));
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn zodiac_serde_round_trips() {
+        for z in [
+            Zodiac::Tropical,
+            Zodiac::Sidereal(Ayanamsa::FaganBradley),
+            Zodiac::Sidereal(Ayanamsa::Lahiri),
+        ] {
+            let json = serde_json::to_string(&z).unwrap();
+            assert_eq!(serde_json::from_str::<Zodiac>(&json).unwrap(), z);
+        }
+        let h = cast(HouseSystem::Placidus, Zodiac::Tropical);
+        let back: Houses = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
+        assert_eq!(back, h);
+    }
 }
 
 #[cfg(test)]

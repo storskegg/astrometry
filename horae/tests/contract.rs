@@ -239,6 +239,50 @@ fn chart_json() {
     assert_eq!(serde_json::from_str::<Aspect>(&json).unwrap(), aspect);
 }
 
+#[test]
+fn house_systems_and_ayanamsas_in_order() {
+    use horae::chart::{Ayanamsa, HouseSystem};
+    let names: Vec<&str> = HouseSystem::ALL.iter().map(|s| s.name()).collect();
+    assert_eq!(names, ["Whole Sign", "Equal", "Placidus", "Koch"]);
+    let names: Vec<&str> = Ayanamsa::ALL.iter().map(|a| a.name()).collect();
+    assert_eq!(names, ["Fagan-Bradley", "Lahiri"]);
+    assert_eq!(Ayanamsa::default(), Ayanamsa::FaganBradley);
+    assert_eq!(
+        "whole sign".parse::<HouseSystem>(),
+        Ok(HouseSystem::WholeSign)
+    );
+    assert_eq!(
+        "fagan-bradley".parse::<Ayanamsa>(),
+        Ok(Ayanamsa::FaganBradley)
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn zodiac_and_houses_json() {
+    use horae::chart::{Ayanamsa, HouseSystem, Houses, Zodiac};
+    assert_eq!(
+        serde_json::to_string(&Zodiac::default()).unwrap(),
+        r#""Tropical""#
+    );
+    assert_eq!(
+        serde_json::to_string(&Zodiac::Sidereal(Ayanamsa::FaganBradley)).unwrap(),
+        r#"{"Sidereal":"Fagan-Bradley"}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<Zodiac>(r#"{"Sidereal":"Lahiri"}"#).unwrap(),
+        Zodiac::Sidereal(Ayanamsa::Lahiri)
+    );
+    let houses = Houses {
+        system: HouseSystem::Koch,
+        cusps: std::array::from_fn(|i| 10.5 + 30.0 * i as f64),
+    };
+    assert_eq!(
+        serde_json::to_string(&houses).unwrap(),
+        r#"{"system":"Koch","cusps":[10.5,40.5,70.5,100.5,130.5,160.5,190.5,220.5,250.5,280.5,310.5,340.5]}"#
+    );
+}
+
 /// The JSON shape of what astro-clock caches, reduced to its keys and kinds (each array to the
 /// union of its elements'), so new data leaves it alone and a changed field doesn't.
 #[cfg(feature = "serde")]
