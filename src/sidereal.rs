@@ -1,6 +1,6 @@
-//! Sidereal time: the Earth Rotation Angle, and Greenwich mean and apparent sidereal time
-//! (IAU 2006), as SOFA's `iauEra00`, `iauGmst06` and `iauGst06a` have them, the equation of
-//! the equinoxes' complementary terms to their two largest.
+//! Sidereal time: the Earth Rotation Angle, and Greenwich mean and apparent sidereal time.
+//! `gmst` follows IERS Conventions (2010) eq. 5.32 (IAU 2006). `gast` is GMST plus the equation
+//! of the equinoxes (IERS 2010 §5.5.7), with its two largest complementary terms.
 
 use std::f64::consts::TAU;
 
@@ -8,10 +8,16 @@ use crate::nutation::{ARCSEC, nutation};
 use crate::precession::mean_obliquity;
 use crate::time::{J2000, centuries};
 
-/// The Earth Rotation Angle at UT1 Julian date `ut1`, radians, 0–2π.
+/// The Earth Rotation Angle, radians, 0–2π, at UT1 Julian date `ut1`.
+///
+/// IERS Conventions (2010) eq. 5.15: θ = 2π (0.7790572732640 + 1.00273781191135448 Tu), with
+/// Tu = `ut1` − 2451545.0. Written as in Capitaine, Guinot and McCarthy (2000, A&A 355, 398,
+/// eq. 14): the whole days are whole turns, so only the day fraction f and the small
+/// 0.00273781191135448 Tu term are kept, which saves precision.
 pub fn earth_rotation_angle(ut1: f64) -> f64 {
-    let d = ut1 - J2000;
-    (TAU * (d.fract() + 0.7790572732640 + 0.00273781191135448 * d)).rem_euclid(TAU)
+    let tu = ut1 - J2000;
+    let f = ut1.rem_euclid(1.0);
+    (TAU * (f + 0.7790572732640 + 0.00273781191135448 * tu)).rem_euclid(TAU)
 }
 
 /// Greenwich mean sidereal time, radians, at UT1 `ut1` and TT `tt` (Julian dates).
@@ -44,6 +50,7 @@ mod tests {
     // (2400000.5, 53736.0) for both UT1 and TT.
     #[test]
     #[allow(clippy::excessive_precision)]
+    // The expected values are SOFA's published test values, used here as a check.
     fn against_sofa() {
         assert!((earth_rotation_angle(2400000.5 + 54388.0) - 0.4022837240028158102).abs() < 1e-12);
         let jd = 2400000.5 + 53736.0;

@@ -9,13 +9,10 @@ use crate::precession;
 use crate::source::{Body, Source};
 use crate::spk;
 use crate::time::{DAY, tdb_minus_tt};
-use crate::vector::{Vec3, add, cross, dot, norm, scale, sub, unit};
+use crate::vector::{Vec3, add, dot, norm, scale, sub, unit};
 
 /// The speed of light, au/day.
 pub const C: f64 = 299_792.458 * DAY / crate::source::AU;
-
-/// The Sun's Schwarzschild radius, au (2GM/c²).
-const SRS: f64 = 1.97412574336e-8;
 
 /// An apparent position.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,22 +27,42 @@ pub struct Apparent {
     pub direction: Vec3,
 }
 
-/// The light-deflected direction `p` of a body at `q` (unit, from the Sun) seen from the
-/// observer at `e` (unit, from the Sun) at distance `em` au from the Sun: SOFA's `iauLd` for
-/// the Sun.
+/// The Sun's gravitational parameter GM☉, au³/day² (DE440; Park et al. 2021, AJ 161, 105).
+const GM_SUN: f64 = 2.959_122_082_841_195e-4;
+
+/// The Sun's Schwarzschild radius 2μ/c² = 2 GM☉ / c², au (c in au/day, from `C`).
+const SCHWARZSCHILD_SUN: f64 = 2.0 * GM_SUN / (C * C);
+
+/// Light deflection by the Sun's gravity.
+///
+/// `p` is the unit geocentric direction to the body, `q` the unit vector from the Sun to the
+/// body, `e` the unit vector from the Sun to the observer and `em` the observer's distance from
+/// the Sun, au. Explanatory Supplement to the Astronomical Almanac (3rd ed., 2013, §7.2), Kaplan,
+/// USNO Circular 179 (2005, §7.2), IERS Conventions (2010) ch. 11:
+/// p₁ = p + (2μ/c² E) / (1 + q·e) × [(p·q) e − (e·p) q].
 fn deflect(p: Vec3, q: Vec3, e: Vec3, em: f64) -> Vec3 {
-    let w = SRS / em / (dot(q, e) + 1.0).max(1e-9);
-    add(p, scale(w, cross(p, cross(e, q))))
+    let qe = dot(q, e);
+    // The formula blows up as 1 + q·e → 0, a body directly behind the Sun. Below 1e-9 (the
+    // body within about 9 arcseconds of the Sun's centre, well inside its disc) there is no
+    // deflection at all: the body is hidden, and the position is meaningless anyway.
+    if 1.0 + qe < 1e-9 {
+        return p;
+    }
+    let g = SCHWARZSCHILD_SUN / em / (1.0 + qe);
+    let d = sub(scale(dot(p, q), e), scale(dot(e, p), q));
+    unit(add(p, scale(g, d)))
 }
 
-/// The direction `p` (unit) aberrated by the observer's barycentric velocity `v` (units of c)
-/// at distance `s` au from the Sun: SOFA's `iauAb`.
-fn aberrate(p: Vec3, v: Vec3, s: f64) -> Vec3 {
-    let bm1 = (1.0 - dot(v, v)).sqrt();
-    let pdv = dot(p, v);
-    let w1 = 1.0 + pdv / (1.0 + bm1);
-    let w2 = SRS / s;
-    unit([0, 1, 2].map(|i| p[i] * bm1 + w1 * v[i] + w2 * (v[i] - pdv * p[i])))
+/// Relativistic annual aberration.
+///
+/// `p` is the unit direction to the body, `v` the observer's barycentric velocity in units of c.
+/// Explanatory Supplement (3rd ed., §7.2, eq. 7.40), Kaplan, USNO Circular 179:
+/// with 1/β = √(1 − v·v), p′ = [p/β + (1 + (p·v)/(1 + 1/β)) v] / (1 + p·v), normalised.
+fn aberrate(p: Vec3, v: Vec3) -> Vec3 {
+    let pv = dot(p, v);
+    let ib = (1.0 - dot(v, v)).sqrt();
+    let w = 1.0 + pv / (1.0 + ib);
+    unit(scale(1.0 / (1.0 + pv), add(scale(ib, p), scale(w, v))))
 }
 
 /// The apparent direction of `body` in GCRS axes (a unit vector) and its light-time distance,
@@ -74,7 +91,7 @@ pub(crate) fn direction(src: &dyn Source, body: Body, tt: f64) -> Result<(Vec3, 
         let e = sub(earth, sun);
         p = deflect(p, q, unit(e), norm(e));
     }
-    p = aberrate(p, scale(1.0 / C, earth_v), norm(sub(earth, sun)));
+    p = aberrate(p, scale(1.0 / C, earth_v));
     Ok((p, distance))
 }
 
