@@ -81,17 +81,19 @@ fn ensure_de440(path: &Path) -> Result {
     println!("==> download de440.bsp");
     std::fs::create_dir_all(path.parent().expect("a file path"))
         .map_err(|e| format!("{}: {e}", path.display()))?;
+    // Downloaded beside it and renamed once complete, so an interrupted download never passes
+    // for the real file.
+    let part = path.with_extension("bsp.part");
     let status = Command::new("curl")
         .args(["-sS", "--fail", "-L", "-o"])
-        .arg(path)
+        .arg(&part)
         .arg(DE440_URL)
         .status()
         .map_err(|e| format!("curl: {e}"))?;
     if status.success() {
-        Ok(())
+        std::fs::rename(&part, path).map_err(|e| format!("{}: {e}", path.display()))
     } else {
-        // Don't leave a partial file that would pass for the real one.
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(&part);
         Err(format!("download de440.bsp: {DE440_URL}: {status}"))
     }
 }
