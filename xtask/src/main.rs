@@ -1,5 +1,6 @@
 //! `cargo xtask`: the repository's tasks.
 
+mod check;
 mod de440;
 mod fixtures;
 mod version;
@@ -14,9 +15,15 @@ tasks:
                  fetch the crate's reference data (JPL Horizons, IERS, USNO, IANA, IMCCE,
                  the Swiss Ephemeris' numbers), or the named parts
   de440          cut the crate's built-in slice of DE440 from de440.bsp (ASTROMETRY_DE440,
-                 or target/jpl/de440.bsp)
+                 or local/jpl/de440.bsp)
   outer          cut the outer planets' file (Uranus, Neptune, Pluto; feature `outer-planets`)
                  from the same de440.bsp
+  check [--no-jpl]
+                 the CI matrix, locally: fmt, clippy, the tests, wasm32, the MSRV (1.99) and
+                 the iOS builds. Builds go through this task: it runs `cargo clean` before and
+                 after, so every build starts from nothing. It downloads de440.bsp to
+                 local/jpl/ (kept across cleans) unless it's there; --no-jpl skips the
+                 download, and the JPL tests then skip
   version [DATE] [--write]
                  print the next calendar version YYYY.WW.PATCH for DATE (YYYY-MM-DD, default
                  today in UTC); --write sets it in the manifests, README and Cargo.lock.
@@ -32,6 +39,7 @@ fn main() -> ExitCode {
         ["fixtures", parts @ ..] => fixtures::run(parts),
         ["de440"] => de440::run(),
         ["outer"] => de440::outer(),
+        ["check", rest @ ..] => check::run(rest),
         ["version", rest @ ..] => version::run(rest),
         ["help" | "--help" | "-h"] => {
             print!("{USAGE}");

@@ -2,7 +2,7 @@
 //! Ephemeris.
 //!
 //! DE440 (120 MB) isn't in the repository: these tests read it from `ASTROMETRY_DE440`, or
-//! `target/jpl/de440.bsp` in the workspace, and are skipped without it. CI downloads it.
+//! `local/jpl/de440.bsp` in the workspace root, and are skipped without it. CI downloads it.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -11,12 +11,12 @@ use astrometry::apparent::apparent;
 use astrometry::source::{Body, Builtin, Jpl, Source};
 
 /// DE440: from `ASTROMETRY_DE440`, which must then exist (CI sets it), or else from
-/// `target/jpl/de440.bsp` if it's there.
+/// `local/jpl/de440.bsp` if it's there.
 fn de440() -> Option<Jpl> {
     if let Some(path) = std::env::var_os("ASTROMETRY_DE440").filter(|p| !p.is_empty()) {
         return Some(Jpl::open(PathBuf::from(path)).expect("ASTROMETRY_DE440"));
     }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/jpl/de440.bsp");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("local/jpl/de440.bsp");
     if !path.exists() {
         eprintln!("skipped: no DE440 at {}", path.display());
         return None;

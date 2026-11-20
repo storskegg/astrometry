@@ -1,6 +1,6 @@
 //! `cargo xtask de440` and `cargo xtask outer`: cut the crate's built-in slice of DE440 (see
 //! its `slice` module for the format), and the outer planets' file, from a downloaded
-//! de440.bsp: `ASTROMETRY_DE440`, or `target/jpl/de440.bsp`.
+//! de440.bsp: `ASTROMETRY_DE440`, or `local/jpl/de440.bsp`.
 
 use std::io::Write;
 
@@ -46,7 +46,7 @@ pub fn outer() -> Result {
 fn cut(segments: &[(i32, i32, f64)], file: &str) -> Result {
     let path = std::env::var_os("ASTROMETRY_DE440")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root().join("target/jpl/de440.bsp"));
+        .unwrap_or_else(|| root().join("local/jpl/de440.bsp"));
     let spk = Spk::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     // Per segment: its head, then the deflated blocks of about a year's records each.
     let mut heads = Vec::new();

@@ -78,9 +78,16 @@ members, as "North Node" and "Under the Beams".
 ## The tests and the data
 
 `cargo test` runs the tests against the built-in data and the checked-in reference numbers,
-offline. With `ASTROMETRY_DE440` naming a downloaded
-[`de440.bsp`](https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp) (120 MB), the JPL
-tests run too, against the full file.
+offline. With a downloaded
+[`de440.bsp`](https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp) (120 MB) at
+`local/jpl/de440.bsp` (git-ignored, and outside `target/` so that a clean keeps it), or named
+by `ASTROMETRY_DE440`, the JPL tests run too, against the full file.
+
+- `cargo xtask check [--no-jpl]` runs the whole CI matrix locally: fmt, clippy, the tests,
+  the wasm32 and MSRV (1.99) checks and the iOS builds. Every local build starts from a
+  clean, so it runs `cargo clean` first and again at the end: builds start from nothing each
+  time. It downloads `de440.bsp` to `local/jpl/` if it's missing; `--no-jpl` skips that, and
+  the JPL tests then skip.
 
 - `cargo xtask fixtures [PART...]` fetches the reference data again: JPL Horizons, the IERS,
   USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers.

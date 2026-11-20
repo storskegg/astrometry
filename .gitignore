@@ -1,5 +1,8 @@
 /target
 
+# Large downloads kept between builds, outside target/ so that a clean doesn't remove them.
+/local/
+
 # Per-user IDE state.
 /.idea/
 
