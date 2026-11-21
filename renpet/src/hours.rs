@@ -104,10 +104,13 @@ pub fn day(src: &dyn Source, t: &Zoned, lat: f64, lon: f64) -> Result<Day, Error
     let tt = time::tt(t.timestamp());
     let (phi, east) = (lat.to_radians(), lon.to_radians());
     let events = sun_crossings(src, tt - 1.5, tt + 1.5, phi, east, SUNRISE)?;
+    // Compared as the whole seconds the hours are given in, so that `t` equal to the sunrise
+    // returned is in its day, as `civil_date_at` has it.
+    let now = t.timestamp();
     let rise = events
         .iter()
         .rev()
-        .find(|e| e.rising && e.tt <= tt)
+        .find(|e| e.rising && time::timestamp(e.tt).is_ok_and(|r| r <= now))
         .map(|e| e.tt);
     let set = rise.and_then(|r| events.iter().find(|e| !e.rising && e.tt > r).map(|e| e.tt));
     let next = set.and_then(|s| events.iter().find(|e| e.rising && e.tt > s).map(|e| e.tt));
@@ -349,6 +352,12 @@ mod tests {
             civil_date_at(&Builtin, &after, LUXOR.0, LUXOR.1).unwrap(),
             today
         );
+        // `day` turns at the same second.
+        let at_rise = hours_of(day(&Builtin, &after, LUXOR.0, LUXOR.1).unwrap());
+        assert_eq!(at_rise.sunrise, rise);
+        assert_eq!(at_rise.hour_at(rise).map(|h| (h.half, h.n)), Some((Half::Day, 1)));
+        let just_before = hours_of(day(&Builtin, &before, LUXOR.0, LUXOR.1).unwrap());
+        assert_eq!(just_before.next_sunrise, rise);
         // Just before midnight is still the same Egyptian day as noon.
         let late = at("2026-11-21T23:59[Africa/Cairo]");
         assert_eq!(
