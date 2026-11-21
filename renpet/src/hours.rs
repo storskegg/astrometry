@@ -355,7 +355,10 @@ mod tests {
         // `day` turns at the same second.
         let at_rise = hours_of(day(&Builtin, &after, LUXOR.0, LUXOR.1).unwrap());
         assert_eq!(at_rise.sunrise, rise);
-        assert_eq!(at_rise.hour_at(rise).map(|h| (h.half, h.n)), Some((Half::Day, 1)));
+        assert_eq!(
+            at_rise.hour_at(rise).map(|h| (h.half, h.n)),
+            Some((Half::Day, 1))
+        );
         let just_before = hours_of(day(&Builtin, &before, LUXOR.0, LUXOR.1).unwrap());
         assert_eq!(just_before.next_sunrise, rise);
         // Just before midnight is still the same Egyptian day as noon.
