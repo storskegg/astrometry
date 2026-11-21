@@ -18,7 +18,9 @@ tasks:
                  downloads de440.bsp (120 MB) to local/jpl/, rebuilds the built-in slice and
                  writes the reference fixture from it, runs every test against the full
                  file, and deletes it. The Swiss Ephemeris parts delete target/swisseph when
-                 they're done
+                 they're done. The part `stars` makes tests/data/swisseph/stars.tsv: the
+                 Swiss Ephemeris' Sirius, from data/stars.tsv, apparent positions, risings
+                 and settings, and heliacal risings
   de440          cut the crate's built-in slice of DE440 from a de440.bsp you have
                  (ASTROMETRY_DE440, or local/jpl/de440.bsp)
   outer          cut the outer planets' file (Uranus, Neptune, Pluto; feature `outer-planets`)

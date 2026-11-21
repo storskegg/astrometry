@@ -78,6 +78,29 @@ compiled in with `embedded`, otherwise `astrometry::slice::install_outer(&bytes)
 (of either) serializes their results; horae's names its
 members, as "North Node" and "Under the Beams".
 
+### Fixed stars
+
+`astrometry::stars` gives the apparent position of a fixed star, from a catalogue row in
+`data/stars.tsv` (Sirius, HIP 32349, for now; the astrometry is from the Hipparcos new
+reduction, van Leeuwen 2007, and the radial velocity from SIMBAD). The reduction is the one
+the bodies have, with a star's own steps first: rigorous space motion with the radial
+velocity from the catalogue epoch, parallax from the Earth's barycentric position, the Sun's
+light deflection, annual aberration, then IAU 2006 precession and IAU 2000A_R06 nutation.
+`stars::apparent` gives the same `Apparent` as the bodies, `stars::equatorial` the right
+ascension and declination of date, and `stars::altitude` and `stars::crossings` the altitude
+and the rising and setting, as `horizon` does for the Sun. Against the Swiss Ephemeris, fed
+the same catalogue row, the reduction agrees within 0.0005 mas in the ICRS axes over
+1800–2200, and positions of date within 2.4 mas, which is the two programs' precession and
+nutation models (the Swiss Ephemeris' defaults differ from IAU 2006 and 2000A_R06, for every
+body). Sirius's risings and settings agree within 0.15 s.
+
+```rust
+use astrometry::source::Builtin;
+use astrometry::stars::{equatorial, sirius};
+
+let (ra, dec) = equatorial(&Builtin, &sirius(), tt)?;
+```
+
 ## The tests and the data
 
 `cargo test` runs offline, against the built-in data and the checked-in reference numbers,
@@ -93,6 +116,11 @@ named by `ASTROMETRY_DE440` are skipped without it. No external ephemeris stays 
 - `cargo xtask fixtures [PART...]` fetches the reference data again: JPL Horizons, the IERS,
   USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers (which are
   made in a throwaway environment under `target/swisseph`, deleted afterwards).
+- `cargo xtask fixtures stars` makes `tests/data/swisseph/stars.tsv`: the Swiss Ephemeris'
+  Sirius, from this crate's own `data/stars.tsv` through a fixed-star file, in the same
+  throwaway environment: its apparent positions, its risings and settings at Luxor and
+  Heliopolis, and its heliacal risings (for later use; nothing tests them yet). Near 1300 BCE
+  it reads its own ephemeris files, which it downloads there too, and deletes.
 - `cargo xtask fixtures de440` downloads `de440.bsp` to `local/jpl/`, rebuilds the two
   built-in files from it, writes `reference.bin`, runs every test against the full file, and
   deletes the download, whatever happened. The files it rebuilds must be byte-identical to

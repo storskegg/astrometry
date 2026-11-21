@@ -35,6 +35,10 @@
 //!   ayanamsas, and a few sidereal Sun and Moon longitudes.
 //! - `tests/data/swisseph/declinations.tsv`: its apparent declinations and their speeds
 //!   (JPL mode), for the planets, the mean and true nodes and the mean apogee.
+//! - `tests/data/swisseph/stars.tsv`: its apparent positions of Sirius, fed the crate's own
+//!   `data/stars.tsv` row through a fixed-star file, at some 200 instants in 1800–2200 and five
+//!   near 1300 BCE; its risings and settings of Sirius at Luxor and Heliopolis; and its
+//!   heliacal risings (`swe_heliacal_ut`) there. The part is `stars`.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -67,7 +71,7 @@ const BODIES: [(&str, &str); 13] = [
 /// A fixture: what makes it.
 type Part = fn() -> Result;
 
-const PARTS: [(&str, Part); 12] = [
+const PARTS: [(&str, Part); 13] = [
     ("deltat", deltat),
     ("usno", usno),
     ("leap-seconds", leap_seconds),
@@ -79,6 +83,7 @@ const PARTS: [(&str, Part); 12] = [
     ("swisseph", swisseph),
     ("houses", houses),
     ("declinations", declinations),
+    ("stars", stars),
     ("de440", crate::de440::pipeline),
 ];
 
@@ -113,12 +118,24 @@ fn jd(y: i32, m: i32, d: i32) -> f64 {
 /// The Swiss Ephemeris fixtures, by `fixtures/swisseph_fixtures.py` in a virtual environment
 /// under `target/`, with DE440 and the Swiss Ephemeris' own files downloaded there too.
 fn swisseph() -> Result {
-    swiss_run("swisseph_fixtures.py", "tests/data/swisseph/positions.tsv")
+    swiss_run(
+        "swisseph_fixtures.py",
+        "tests/data/swisseph/positions.tsv",
+        &instants(),
+        &[],
+        &[],
+    )
 }
 
 /// The Swiss Ephemeris' house cusps and ayanamsas, by `fixtures/swisseph_houses.py`.
 fn houses() -> Result {
-    swiss_run("swisseph_houses.py", "tests/data/swisseph/houses.tsv")
+    swiss_run(
+        "swisseph_houses.py",
+        "tests/data/swisseph/houses.tsv",
+        &instants(),
+        &[],
+        &[],
+    )
 }
 
 /// The Swiss Ephemeris' declinations, by `fixtures/swisseph_declinations.py`.
@@ -126,20 +143,66 @@ fn declinations() -> Result {
     swiss_run(
         "swisseph_declinations.py",
         "tests/data/swisseph/declinations.tsv",
+        &instants(),
+        &[],
+        &[],
     )
 }
 
+/// The Swiss Ephemeris' fixed star Sirius, from the crate's own `data/stars.tsv` through a
+/// fixed-star file of its own, by `fixtures/swisseph_stars.py`. Its own files for 1300 BCE
+/// (DE440 starts in 1550) come with it.
+fn stars() -> Result {
+    swiss_run(
+        "swisseph_stars.py",
+        "tests/data/swisseph/stars.tsv",
+        &star_instants(),
+        &["seplm18.se1", "semom18.se1"],
+        &["data/stars.tsv"],
+    )
+}
+
+/// About 200 instants over 1800–2200, and 5 in the year 1300 BCE (JD 1246598.5 is 1 January,
+/// Julian calendar), as TT Julian dates to the second.
+fn star_instants() -> Vec<f64> {
+    const START: f64 = 2378496.5; // 1800-01-01
+    const SPAN: f64 = 146097.0; // 400 years
+    let mut x: u64 = 0x2545F4914F6CDD1D;
+    let mut out = Vec::new();
+    for _ in 0..200 {
+        // splitmix64
+        x = x.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = x;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        let u = (z >> 11) as f64 / (1u64 << 53) as f64;
+        out.push(START + (u * SPAN * 86400.0).round() / 86400.0);
+    }
+    out.extend([0.0, 70.0, 140.0, 210.0, 280.0].map(|d| 1246598.5 + d));
+    out
+}
+
 /// Runs a Swiss Ephemeris script from `fixtures/` in the virtual environment, writing `out`.
-/// Everything it downloaded or built under `target/swisseph` is deleted afterwards, whatever
-/// happened.
-fn swiss_run(script: &str, out: &str) -> Result {
+/// It gets the TT Julian dates `instants`, in a file, and the repository files `args` (paths
+/// from the root) after the output file; `files` are further Swiss Ephemeris data files to
+/// download. Everything it downloaded or built under `target/swisseph` is deleted afterwards,
+/// whatever happened.
+fn swiss_run(script: &str, out: &str, instants: &[f64], files: &[&str], args: &[&str]) -> Result {
     let work = root().join("target/swisseph");
-    let result = swiss_work(&work, script, out);
+    let result = swiss_work(&work, script, out, instants, files, args);
     let _ = fs::remove_dir_all(&work);
     result
 }
 
-fn swiss_work(work: &std::path::Path, script: &str, out: &str) -> Result {
+fn swiss_work(
+    work: &std::path::Path,
+    script: &str,
+    out: &str,
+    instants: &[f64],
+    files: &[&str],
+    args: &[&str],
+) -> Result {
     let ephe = work.join("ephe");
     fs::create_dir_all(&ephe).map_err(|e| e.to_string())?;
     let download = |url: &str, to: &std::path::Path| -> Result {
@@ -165,7 +228,10 @@ fn swiss_work(work: &std::path::Path, script: &str, out: &str) -> Result {
         "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
         &jpl,
     )?;
-    for f in ["sepl_18.se1", "semo_18.se1", "seas_18.se1"] {
+    for f in ["sepl_18.se1", "semo_18.se1", "seas_18.se1"]
+        .into_iter()
+        .chain(files.iter().copied())
+    {
         let url = format!("https://raw.githubusercontent.com/aloistr/swisseph/master/ephe/{f}");
         download(&url, &ephe.join(f))?;
     }
@@ -182,7 +248,7 @@ fn swiss_work(work: &std::path::Path, script: &str, out: &str) -> Result {
         ]))?;
     }
     let instants_file = work.join("instants.txt");
-    let list: Vec<String> = instants().iter().map(|jd| format!("{jd:.9}")).collect();
+    let list: Vec<String> = instants.iter().map(|jd| format!("{jd:.9}")).collect();
     fs::write(&instants_file, list.join("\n") + "\n").map_err(|e| e.to_string())?;
     let out = root().join(out);
     fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -194,7 +260,8 @@ fn swiss_work(work: &std::path::Path, script: &str, out: &str) -> Result {
             .arg(&jpl)
             .arg(&ephe)
             .arg(&instants_file)
-            .arg(&out),
+            .arg(&out)
+            .args(args.iter().map(|a| root().join(a))),
     )?;
     println!("wrote {}", out.strip_prefix(root()).unwrap().display());
     Ok(())
