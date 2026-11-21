@@ -40,7 +40,11 @@ ids_enum!(
 
 ids_enum!(
     /// The twelve months, in order, four to a season. The transliterations are provisional:
-    /// the Ramesside-period forms are to be confirmed.
+    /// the Ramesside-period forms are to be confirmed. Month XII is wp-rnpt, its name in the
+    /// Ramesside period: the Deir el-Medina sources give months I–XI their later names, but XII
+    /// still wp-rnpt; mswt-rꜥ is then a feast's name, and the month's only later (J. A.
+    /// Belmonte, "Some open questions on the Egyptian calendar", *Trabajos de Egiptología* 2,
+    /// 2003, Table 1, p. 27, and p. 36). The id keeps the later name.
     Month,
     [
         /// Provisional: the Ramesside-period forms are to be confirmed.
@@ -66,7 +70,7 @@ ids_enum!(
         /// Provisional: the Ramesside-period forms are to be confirmed.
         Ipip => ("month.ipip", "jpjp"),
         /// Provisional: the Ramesside-period forms are to be confirmed.
-        MesutRa => ("month.mesut_ra", "mswt-rꜥ"),
+        MesutRa => ("month.mesut_ra", "wp-rnpt"),
     ]
 );
 
