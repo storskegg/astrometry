@@ -144,14 +144,17 @@ pub fn day(src: &dyn Source, t: &Zoned, lat: f64, lon: f64) -> Result<Day, Error
 }
 
 /// The Egyptian date at `t` at latitude `lat` and longitude `lon` (degrees, north and east
-/// positive): that of the Gregorian date of `t` in its own time zone, unless `t` is before
-/// that date's sunrise there, and then the day before's. Where the Sun doesn't rise that day,
-/// the day begins at 06:00 local mean solar time, 06:00 UT less `lon`/15 hours.
+/// positive): the day begun by the last sunrise there at or before `t`, dated by the place's
+/// own local mean solar time (UT plus `lon`/15 hours), so the answer doesn't depend on `t`'s
+/// time zone. Where the Sun doesn't rise that day, the day begins at 06:00 local mean solar
+/// time. Sunrise is taken to the whole second, as [`day`] gives it.
 pub fn civil_date_at(src: &dyn Source, t: &Zoned, lat: f64, lon: f64) -> Result<CivilDate, Error> {
-    let date = t.date();
+    check_coordinates(lat, lon)?;
+    let now = t.timestamp();
+    let date = mean_solar_date(now, lon)?;
     let today = civil_date_of(date);
     let start = civil_day_start(src, &today, t.time_zone(), lat, lon)?;
-    if t.timestamp() >= start.timestamp() {
+    if now >= start.timestamp() {
         Ok(today)
     } else {
         let yesterday = date.yesterday().map_err(|_| Error::OutOfRange)?;
@@ -170,13 +173,9 @@ pub fn civil_day_start(
     lon: f64,
 ) -> Result<Zoned, Error> {
     check_coordinates(lat, lon)?;
-    let date = d.gregorian();
-    let begin = date.to_zoned(tz.clone()).map_err(|_| Error::OutOfRange)?;
-    let end = date
-        .tomorrow()
-        .and_then(|n| n.to_zoned(tz.clone()))
-        .map_err(|_| Error::OutOfRange)?;
-    let (from, to) = (begin.timestamp(), end.timestamp());
+    // The place's own day, midnight to midnight local mean solar time: the sunrise that
+    // begins the Egyptian day always falls in it, whatever zone the answer is given in.
+    let (from, to) = mean_solar_day(d.gregorian(), lon)?;
     let events = sun_crossings(
         src,
         time::tt(from) - 0.1,
@@ -191,15 +190,37 @@ pub fn civil_day_start(
             return Ok(at.to_zoned(tz.clone()));
         }
     }
-    let midnight_ut = date
-        .at(0, 0, 0, 0)
-        .to_zoned(TimeZone::UTC)
-        .map_err(|_| Error::OutOfRange)?
-        .timestamp()
-        .as_second();
-    let secs = midnight_ut + 6 * 3600 - (lon / 15.0 * 3600.0).round() as i64;
-    let at = Timestamp::from_second(secs).map_err(|_| Error::OutOfRange)?;
-    Ok(at.to_zoned(tz.clone()))
+    let six = from
+        .checked_add(jiff::SignedDuration::from_hours(6))
+        .map_err(|_| Error::OutOfRange)?;
+    Ok(six.to_zoned(tz.clone()))
+}
+
+/// Local mean solar time's offset from UT at longitude `lon` (degrees east), whole seconds.
+fn mean_solar_offset(lon: f64) -> jiff::SignedDuration {
+    jiff::SignedDuration::from_secs((lon / 15.0 * 3600.0).round() as i64)
+}
+
+/// The date of `t` in local mean solar time at longitude `lon`.
+fn mean_solar_date(t: Timestamp, lon: f64) -> Result<jiff::civil::Date, Error> {
+    let local = t
+        .checked_add(mean_solar_offset(lon))
+        .map_err(|_| Error::OutOfRange)?;
+    Ok(local.to_zoned(TimeZone::UTC).date())
+}
+
+/// Midnight to midnight of `date` in local mean solar time at longitude `lon`.
+fn mean_solar_day(date: jiff::civil::Date, lon: f64) -> Result<(Timestamp, Timestamp), Error> {
+    let midnight = |d: jiff::civil::Date| -> Result<Timestamp, Error> {
+        let ut = d
+            .to_zoned(TimeZone::UTC)
+            .map_err(|_| Error::OutOfRange)?
+            .timestamp();
+        ut.checked_sub(mean_solar_offset(lon))
+            .map_err(|_| Error::OutOfRange)
+    };
+    let next = date.tomorrow().map_err(|_| Error::OutOfRange)?;
+    Ok((midnight(date)?, midnight(next)?))
 }
 
 #[cfg(test)]
@@ -369,5 +390,33 @@ mod tests {
         );
         let start = civil_day_start(&Builtin, &today, &tz, LUXOR.0, LUXOR.1).unwrap();
         assert_eq!(start.timestamp(), rise);
+    }
+
+    // The answer is the place's, whatever zone `t` is given in: 10:29 in Chicago is 16:29 UT,
+    // 18:39 local mean time at Luxor, after that morning's sunrise there.
+    #[test]
+    fn the_civil_date_is_the_places_whatever_the_zone() {
+        let t = at("2026-11-21T10:29[America/Chicago]");
+        let want = civil_date_of(jiff::civil::date(2026, 11, 21));
+        for tz in [
+            "America/Chicago",
+            "UTC",
+            "Pacific/Kiritimati",
+            "Pacific/Pago_Pago",
+        ] {
+            let z = t.with_time_zone(TimeZone::get(tz).unwrap());
+            assert_eq!(
+                civil_date_at(&Builtin, &z, LUXOR.0, LUXOR.1).unwrap(),
+                want,
+                "{tz}"
+            );
+        }
+        // The sunrise that begins it, in any zone, is the one `day` gives.
+        let rise = hours_of(day(&Builtin, &t, LUXOR.0, LUXOR.1).unwrap()).sunrise;
+        for tz in ["America/Chicago", "Pacific/Kiritimati"] {
+            let tz = TimeZone::get(tz).unwrap();
+            let start = civil_day_start(&Builtin, &want, &tz, LUXOR.0, LUXOR.1).unwrap();
+            assert_eq!(start.timestamp(), rise, "{tz:?}");
+        }
     }
 }
