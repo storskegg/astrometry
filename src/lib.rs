@@ -17,6 +17,7 @@ pub mod sidereal;
 pub mod slice;
 pub mod source;
 pub mod spk;
+pub mod stars;
 pub mod stations;
 pub mod time;
 pub mod vector;

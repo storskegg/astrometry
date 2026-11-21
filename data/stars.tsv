@@ -1,0 +1,9 @@
+# Fixed stars: astrometry at the catalogue epoch, ICRS. Tab-separated; the first line that is
+# not a comment is the header.
+# hip: Hipparcos number. ra, dec: degrees, ICRS, at the epoch. pm_ra: proper motion in right
+# ascension times cos(dec), mas/yr. pm_dec: mas/yr. parallax: mas. rv: radial velocity, km/s.
+# epoch: TT Julian date of the catalogue epoch (J1991.25 = 2448349.0625).
+# Astrometry: Hipparcos, the New Reduction (van Leeuwen 2007, A&A 474, 653; VizieR I/311/hip2).
+# Radial velocity: SIMBAD (Gontcharov 2006, Astron. Lett. 32, 759).
+hip	ra	dec	pm_ra	pm_dec	parallax	rv	epoch	name	source
+32349	101.28854105	-16.71314306	-546.01	-1223.07	379.21	-5.5	2448349.0625	Sirius	I/311/hip2 (astrometry); SIMBAD, 2006AstL...32..759G (radial velocity)

@@ -6,6 +6,7 @@ use crate::sidereal::gast;
 use crate::source::{Body, Source};
 use crate::spk;
 use crate::time::{DAY, delta_t, ut1_from_tt};
+use crate::vector::Vec3;
 
 /// The altitude of the Sun's centre at sunrise and sunset, radians: the upper edge on the
 /// horizon, allowing for refraction (−0°50′), as the Go version has it.
@@ -19,10 +20,27 @@ fn hour_angle_and_declination(
     tt: f64,
     east: f64,
 ) -> Result<(f64, f64), spk::Error> {
-    let p = gcrs_to_true_equator(tt).apply(direction(src, body, tt)?.0);
+    Ok(hour_angle_and_declination_of(
+        direction(src, body, tt)?.0,
+        tt,
+        east,
+    ))
+}
+
+/// The local apparent hour angle (wrapped to (−π, π]) and declination, radians, of the apparent
+/// direction `p` (a unit vector in GCRS axes) at TT Julian date `tt`, seen from east longitude
+/// `east`.
+pub(crate) fn hour_angle_and_declination_of(p: Vec3, tt: f64, east: f64) -> (f64, f64) {
+    let p = gcrs_to_true_equator(tt).apply(p);
     let (ra, dec) = (p[1].atan2(p[0]), p[2].clamp(-1.0, 1.0).asin());
     let h = gast(ut1_from_tt(tt), tt) + east - ra;
-    Ok((h.sin().atan2(h.cos()), dec))
+    (h.sin().atan2(h.cos()), dec)
+}
+
+/// The altitude, radians, of a point at hour angle `h` and declination `dec`, seen from
+/// latitude `lat` (radians).
+pub(crate) fn altitude_of(h: f64, dec: f64, lat: f64) -> f64 {
+    (lat.sin() * dec.sin() + lat.cos() * dec.cos() * h.cos()).asin()
 }
 
 /// The local apparent hour angle of `body` at TT Julian date `tt`, seen from east longitude
@@ -41,12 +59,12 @@ pub fn altitude(
     east: f64,
 ) -> Result<f64, spk::Error> {
     let (h, dec) = hour_angle_and_declination(src, body, tt, east)?;
-    Ok((lat.sin() * dec.sin() + lat.cos() * dec.cos() * h.cos()).asin())
+    Ok(altitude_of(h, dec, lat))
 }
 
 /// The zero of `f` between `a` and `b`, where `fa` and `fb` (its values there) differ in sign,
 /// by regula falsi with the Illinois modification, until a step is under half a second.
-fn illinois(
+pub(crate) fn illinois(
     f: impl Fn(f64) -> Result<f64, spk::Error>,
     (mut a, mut fa): (f64, f64),
     (mut b, mut fb): (f64, f64),

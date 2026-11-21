@@ -40,7 +40,7 @@ const SCHWARZSCHILD_SUN: f64 = 2.0 * GM_SUN / (C * C);
 /// the Sun, au. Explanatory Supplement to the Astronomical Almanac (3rd ed., 2013, §7.2), Kaplan,
 /// USNO Circular 179 (2005, §7.2), IERS Conventions (2010) ch. 11:
 /// p₁ = p + (2μ/c² E) / (1 + q·e) × [(p·q) e − (e·p) q].
-fn deflect(p: Vec3, q: Vec3, e: Vec3, em: f64) -> Vec3 {
+pub(crate) fn deflect(p: Vec3, q: Vec3, e: Vec3, em: f64) -> Vec3 {
     let qe = dot(q, e);
     // The formula blows up as 1 + q·e → 0, a body directly behind the Sun. Below 1e-9 (the
     // body within about 9 arcseconds of the Sun's centre, well inside its disc) there is no
@@ -58,7 +58,7 @@ fn deflect(p: Vec3, q: Vec3, e: Vec3, em: f64) -> Vec3 {
 /// `p` is the unit direction to the body, `v` the observer's barycentric velocity in units of c.
 /// Explanatory Supplement (3rd ed., §7.2, eq. 7.40), Kaplan, USNO Circular 179:
 /// with 1/β = √(1 − v·v), p′ = [p/β + (1 + (p·v)/(1 + 1/β)) v] / (1 + p·v), normalised.
-fn aberrate(p: Vec3, v: Vec3) -> Vec3 {
+pub(crate) fn aberrate(p: Vec3, v: Vec3) -> Vec3 {
     let pv = dot(p, v);
     let ib = (1.0 - dot(v, v)).sqrt();
     let w = 1.0 + pv / (1.0 + ib);
