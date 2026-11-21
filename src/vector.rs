@@ -1,4 +1,4 @@
-//! Three-vectors and rotation matrices, as SOFA has them.
+//! Three-vectors and rotation matrices.
 
 pub type Vec3 = [f64; 3];
 
@@ -41,13 +41,13 @@ pub struct Mat3(pub [[f64; 3]; 3]);
 impl Mat3 {
     pub const IDENTITY: Mat3 = Mat3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
 
-    /// Rotation of the axes about x by `a` radians, as SOFA's `iauRx` applies it.
+    /// The standard rotation matrix of the axes about x by `a` radians.
     pub fn rx(a: f64) -> Mat3 {
         let (s, c) = a.sin_cos();
         Mat3([[1.0, 0.0, 0.0], [0.0, c, s], [0.0, -s, c]])
     }
 
-    /// Rotation of the axes about z by `a` radians, as SOFA's `iauRz` applies it.
+    /// The standard rotation matrix of the axes about z by `a` radians.
     pub fn rz(a: f64) -> Mat3 {
         let (s, c) = a.sin_cos();
         Mat3([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
