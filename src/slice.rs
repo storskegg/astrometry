@@ -83,7 +83,8 @@ impl Segment {
     pub fn state_after(&self, jd: f64, secs: f64) -> Option<([f64; 3], [f64; 3])> {
         let et = (jd - 2451545.0) * 86400.0 + secs;
         let r = ((et - self.init) / self.interval).floor();
-        if r < 0.0 || r as usize >= self.records {
+        // A NaN date is "not covered" too.
+        if r.is_nan() || r < 0.0 || r >= self.records as f64 {
             return None;
         }
         let r = r as usize;
@@ -91,9 +92,9 @@ impl Segment {
         let mid = self.init + r as f64 * self.interval + radius;
         let x = (et - mid) / radius;
         let n = self.n;
-        let block = self.block(r / self.per_block);
+        let block = self.block(r / self.per_block)?;
         let at = r % self.per_block;
-        let rec = &block[at * 3 * n..(at + 1) * 3 * n];
+        let rec = block.get(at * 3 * n..(at + 1) * 3 * n)?;
         Some(crate::cheb::with_polynomials(x, n, |t, dt| {
             let (mut pos, mut vel) = ([0.0; 3], [0.0; 3]);
             for c in 0..3 {
@@ -105,35 +106,52 @@ impl Segment {
         }))
     }
 
-    /// Block `b`'s coefficients, decoded now if it isn't among the last few used.
-    fn block(&self, b: usize) -> Arc<[f64]> {
+    /// Block `b`'s coefficients, decoded now if it isn't among the last few used; none if the
+    /// block is damaged (so a corrupt file is "not covered", not a panic).
+    fn block(&self, b: usize) -> Option<Arc<[f64]>> {
         // Nothing here leaves the cache half-written, so a poisoned lock is safe to reuse.
         let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(i) = cache.iter().position(|(k, _)| *k == b) {
             cache[..=i].rotate_right(1);
         } else {
-            let coef = self.decode_block(b).expect("the built-in slice");
+            let coef = self.decode_block(b).ok()?;
             cache.insert(0, (b, coef.into()));
             cache.truncate(CACHED);
         }
-        Arc::clone(&cache[0].1)
+        Some(Arc::clone(&cache[0].1))
     }
 
     /// Inflates block `b` and reads its varints.
     fn decode_block(&self, b: usize) -> Result<Vec<f64>, String> {
-        let (offset, len) = self.blocks[b];
-        let records = self.per_block.min(self.records - b * self.per_block);
-        let want = records * 3 * self.n;
         let fail = |what: &str| {
             format!(
                 "slice: segment {}/{} block {b}: {what}",
                 self.target, self.center
             )
         };
+        let &(offset, len) = self.blocks.get(b).ok_or_else(|| fail("no such block"))?;
+        let records = b
+            .checked_mul(self.per_block)
+            .and_then(|first| self.records.checked_sub(first))
+            .map(|left| left.min(self.per_block))
+            .ok_or_else(|| fail("no such block"))?;
+        // `parse` bounded these, so the product can't overflow.
+        let want = records * 3 * self.n;
+        let raw = offset
+            .checked_add(len)
+            .and_then(|end| self.bytes.get().get(offset..end))
+            .ok_or_else(|| fail("past the end of the file"))?;
+        // A varint is at most 10 bytes, so a block of `want` coefficients inflates to no more
+        // than that; reading one byte beyond it catches a stream that overruns (a deflate bomb).
+        let cap = want.saturating_mul(10).saturating_add(1) as u64;
         let mut stream = Vec::new();
-        DeflateDecoder::new(&self.bytes.get()[offset..offset + len])
+        DeflateDecoder::new(raw)
+            .take(cap)
             .read_to_end(&mut stream)
             .map_err(|e| fail(&e.to_string()))?;
+        if stream.len() as u64 >= cap {
+            return Err(fail("inflates to more than its records need"));
+        }
         let mut coef = Vec::with_capacity(want);
         let mut i = 0;
         while i < stream.len() {
@@ -149,6 +167,9 @@ impl Segment {
                 if shift > 63 {
                     return Err(fail("varint too long"));
                 }
+            }
+            if coef.len() == want {
+                return Err(fail("more coefficients than its records need"));
             }
             let q = (v >> 1) as i64 ^ -((v & 1) as i64);
             coef.push(q as f64 * self.step);
@@ -173,42 +194,83 @@ struct Head {
     blocks: Vec<(usize, usize)>,
 }
 
+// Bounds on a head's counts, wide of the real files' (at most 14 coefficients, 36,525 records
+// and 92 records per block) but small enough that nothing absurd is allocated or multiplied.
+/// Coefficients per coordinate: a Chebyshev polynomial of degree 1,023 is far past any ephemeris.
+const MAX_N: usize = 1024;
+/// Records in a segment: 1,000,000 even of a day's span is 2,700 years.
+const MAX_RECORDS: usize = 1_000_000;
+/// Records per block.
+const MAX_PER_BLOCK: usize = 65_536;
+/// Coefficients in one decoded block (8 MiB of f64), the most a block may need.
+const MAX_BLOCK_COEF: usize = 1 << 20;
+/// A block table entry's size: offset (u64) and length (u32).
+const ENTRY_LEN: usize = 8 + 4;
+
+/// A fixed-size array from a slice of that size, as an error not a panic.
+fn word<const N: usize>(s: &[u8]) -> Result<[u8; N], String> {
+    s.try_into().map_err(|_| "slice: truncated".to_string())
+}
+
 /// Reads the heads and block tables, and checks the blocks lie within the file.
 fn parse(bytes: &[u8]) -> Result<Vec<Head>, String> {
-    let mut at = 0usize;
-    let mut take = |n: usize| -> Result<&[u8], String> {
+    let at = std::cell::Cell::new(0usize);
+    let take = |n: usize| -> Result<&[u8], String> {
         let s = bytes
-            .get(at..at.checked_add(n).ok_or("slice: truncated")?)
+            .get(at.get()..at.get().checked_add(n).ok_or("slice: truncated")?)
             .ok_or("slice: truncated")?;
-        at += n;
+        at.set(at.get() + n);
         Ok(s)
     };
+    let u32_ = |s: &[u8]| -> Result<usize, String> { Ok(u32::from_le_bytes(word(s)?) as usize) };
+    let f64_ = |s: &[u8]| -> Result<f64, String> { Ok(f64::from_le_bytes(word(s)?)) };
     if take(8)? != b"ASTRDE02" {
         return Err("slice: not a DE slice".into());
     }
-    let u32_ = |s: &[u8]| u32::from_le_bytes(s.try_into().expect("four")) as usize;
-    let f64_ = |s: &[u8]| f64::from_le_bytes(s.try_into().expect("eight"));
-    let count = u32_(take(4)?);
+    let count = u32_(take(4)?)?;
     let mut heads = Vec::new();
     for _ in 0..count {
-        let target = i32::from_le_bytes(take(4)?.try_into().expect("four"));
-        let center = i32::from_le_bytes(take(4)?.try_into().expect("four"));
-        let init = f64_(take(8)?);
-        let interval = f64_(take(8)?);
-        let n = u32_(take(4)?);
-        let records = u32_(take(4)?);
-        let step = f64_(take(8)?);
-        let per_block = u32_(take(4)?);
-        let count = u32_(take(4)?);
-        if per_block == 0 || count != records.div_ceil(per_block) {
-            return Err(format!(
-                "slice: segment {target}/{center} has a bad block count"
-            ));
+        let target = i32::from_le_bytes(word(take(4)?)?);
+        let center = i32::from_le_bytes(word(take(4)?)?);
+        let init = f64_(take(8)?)?;
+        let interval = f64_(take(8)?)?;
+        let n = u32_(take(4)?)?;
+        let records = u32_(take(4)?)?;
+        let step = f64_(take(8)?)?;
+        let per_block = u32_(take(4)?)?;
+        let count = u32_(take(4)?)?;
+        let bad = |what: &str| format!("slice: segment {target}/{center}: {what}");
+        // A zero, negative, infinite or NaN span or step can't be a Chebyshev record's.
+        if !init.is_finite() || !interval.is_finite() || interval <= 0.0 {
+            return Err(bad("bad start or interval"));
         }
-        let mut blocks = Vec::new();
+        if !step.is_finite() || step <= 0.0 {
+            return Err(bad("bad step"));
+        }
+        if n == 0 || n > MAX_N {
+            return Err(bad("bad coefficient count"));
+        }
+        if records == 0 || records > MAX_RECORDS {
+            return Err(bad("bad record count"));
+        }
+        if per_block == 0
+            || per_block > MAX_PER_BLOCK
+            || per_block.saturating_mul(3 * n) > MAX_BLOCK_COEF
+        {
+            return Err(bad("bad records per block"));
+        }
+        if count != records.div_ceil(per_block) {
+            return Err(bad("bad block count"));
+        }
+        // The table must fit in what's left of the file, checked before it's allocated.
+        if count > bytes.len().saturating_sub(at.get()) / ENTRY_LEN {
+            return Err("slice: truncated".into());
+        }
+        let mut blocks = Vec::with_capacity(count);
         for _ in 0..count {
-            let offset = u64::from_le_bytes(take(8)?.try_into().expect("eight")) as usize;
-            let len = u32_(take(4)?);
+            let offset = usize::try_from(u64::from_le_bytes(word(take(8)?)?))
+                .map_err(|_| "slice: truncated".to_string())?;
+            let len = u32_(take(4)?)?;
             if offset.checked_add(len).is_none_or(|end| end > bytes.len()) {
                 return Err("slice: truncated".into());
             }
@@ -482,6 +544,172 @@ mod tests {
                 let jd = start + (end - start) * f64::from(k) / 200.0;
                 assert_eq!(s.state(jd), built_in.state(jd), "{}/{}", s.target, s.center);
             }
+        }
+    }
+
+    const MAIN: &[u8] = include_bytes!("../data/de440-1800-2200.bin");
+    // Offsets in the first segment's head, after the magic and the segment count.
+    const COUNT: usize = 8;
+    const INIT: usize = 20;
+    const INTERVAL: usize = 28;
+    const N: usize = 36;
+    const RECORDS: usize = 40;
+    const STEP: usize = 44;
+    const PER_BLOCK: usize = 52;
+    const BLOCKS: usize = 56;
+    const TABLE: usize = 60;
+
+    /// Parses `bytes` and queries every segment at a spread of dates: an error or a `None` is
+    /// fine, a panic isn't.
+    fn survives(bytes: &[u8]) {
+        let Ok(segs) = decode(bytes) else { return };
+        for s in &segs {
+            let (a, b) = s.span();
+            for k in 0..=20 {
+                let _ = s.state(a + (b - a) * f64::from(k) / 20.0);
+            }
+            let _ = s.state(f64::NAN);
+        }
+    }
+
+    fn put(bytes: &mut [u8], at: usize, with: &[u8]) {
+        bytes[at..at + with.len()].copy_from_slice(with);
+    }
+
+    #[test]
+    fn a_truncated_file_is_an_error_not_a_panic() {
+        let first = parse(MAIN).unwrap()[0].blocks[0];
+        let mut cuts = vec![0, 1, 7, 8, 9, 11, 12, 13, INIT + 3, BLOCKS + 2, TABLE];
+        cuts.extend([
+            TABLE + 5,
+            TABLE + 12,
+            first.0 - 1,
+            first.0,
+            first.0 + first.1 / 2,
+        ]);
+        cuts.extend((1..=50).map(|k| MAIN.len() * k / 51));
+        cuts.push(MAIN.len() - 1);
+        for cut in cuts {
+            let bytes = &MAIN[..cut];
+            // The tables claim blocks the shortened file hasn't got.
+            assert!(parse(bytes).is_err(), "cut at {cut} parsed");
+            survives(bytes);
+        }
+        assert!(parse(MAIN).is_ok());
+    }
+
+    #[test]
+    fn huge_or_nonsense_counts_are_errors() {
+        for at in [COUNT, N, RECORDS, PER_BLOCK, BLOCKS] {
+            let mut bytes = MAIN.to_vec();
+            put(&mut bytes, at, &u32::MAX.to_le_bytes());
+            assert!(parse(&bytes).is_err(), "huge count at {at}");
+            survives(&bytes);
+        }
+        for at in [N, RECORDS, PER_BLOCK, BLOCKS] {
+            let mut bytes = MAIN.to_vec();
+            put(&mut bytes, at, &0u32.to_le_bytes());
+            assert!(parse(&bytes).is_err(), "zero at {at}");
+        }
+        // A count the bounds allow but the file can't back.
+        let mut bytes = MAIN.to_vec();
+        put(&mut bytes, COUNT, &1_000u32.to_le_bytes());
+        assert!(parse(&bytes).is_err());
+        // A first segment whose table is longer than what's left.
+        assert!(parse(&MAIN[..TABLE + 24]).is_err());
+    }
+
+    #[test]
+    fn a_bad_step_or_interval_is_an_error() {
+        for at in [INIT, INTERVAL, STEP] {
+            for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut bytes = MAIN.to_vec();
+                put(&mut bytes, at, &bad.to_le_bytes());
+                assert!(parse(&bytes).is_err(), "{bad} at {at}");
+            }
+        }
+        for at in [INTERVAL, STEP] {
+            for bad in [0.0f64, -1.0] {
+                let mut bytes = MAIN.to_vec();
+                put(&mut bytes, at, &bad.to_le_bytes());
+                assert!(parse(&bytes).is_err(), "{bad} at {at}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_wrong_magic_or_a_block_past_the_end_is_an_error() {
+        let mut bytes = MAIN.to_vec();
+        put(&mut bytes, TABLE, &(MAIN.len() as u64).to_le_bytes());
+        assert!(parse(&bytes).is_err());
+        put(&mut bytes, TABLE, &u64::MAX.to_le_bytes());
+        assert!(parse(&bytes).is_err());
+        let mut bytes = MAIN.to_vec();
+        put(&mut bytes, TABLE + 8, &u32::MAX.to_le_bytes());
+        assert!(parse(&bytes).is_err());
+        let mut bytes = MAIN.to_vec();
+        put(&mut bytes, 0, b"ASTRDE01");
+        assert!(parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn a_corrupt_block_is_none_when_queried() {
+        let heads = parse(MAIN).unwrap();
+        let head = heads.iter().find(|h| h.target == 301).unwrap();
+        let (offset, len) = head.blocks[0];
+        let mut bytes = MAIN.to_vec();
+        bytes[offset..offset + len].fill(0xff);
+        let segs = decode(&bytes).unwrap();
+        let (start, _) = moon(&segs).span();
+        assert!(moon(&segs).state(start + 1.0).is_none());
+        // The next block is untouched.
+        let block_days = head.per_block as f64 * head.interval / 86400.0;
+        assert!(moon(&segs).state(start + 1.5 * block_days).is_some());
+        // Zeros aren't a deflate stream either.
+        bytes[offset..offset + len].fill(0);
+        let segs = decode(&bytes).unwrap();
+        let _ = moon(&segs).state(start + 1.0);
+    }
+
+    #[test]
+    fn flipped_bytes_inside_blocks_never_panic() {
+        let heads = parse(MAIN).unwrap();
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for head in &heads {
+            for _ in 0..4 {
+                let b = (next() % head.blocks.len() as u64) as usize;
+                let (offset, len) = head.blocks[b];
+                let mut bytes = MAIN.to_vec();
+                for _ in 0..8 {
+                    let at = offset + (next() % len as u64) as usize;
+                    bytes[at] ^= (next() & 0xff) as u8 | 1;
+                }
+                let segs = decode(&bytes).unwrap();
+                let s = segs.iter().find(|s| s.target == head.target).unwrap();
+                let first = (b * head.per_block) as f64 * head.interval / 86400.0;
+                let _ = s.state(s.span().0 + first + 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn a_block_of_the_wrong_size_is_an_error() {
+        // A head with one more coefficient per coordinate than its blocks hold, then one fewer.
+        let n = u32::from_le_bytes(MAIN[N..N + 4].try_into().unwrap());
+        for wrong in [n + 1, n - 1] {
+            let mut bytes = MAIN.to_vec();
+            put(&mut bytes, N, &wrong.to_le_bytes());
+            let segs = decode(&bytes).unwrap();
+            assert!(segs[0].decode_block(0).is_err());
+            assert!(segs[0].decode_block(1_000_000).is_err());
+            let (start, _) = segs[0].span();
+            assert!(segs[0].state(start + 1.0).is_none());
         }
     }
 }
