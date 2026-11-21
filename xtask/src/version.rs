@@ -59,6 +59,15 @@ fn edit(path: &str, f: impl FnOnce(String) -> Result<String>) -> Result {
     fs::write(&path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Like [`set_in_line`], but a text with no such line is left as it is.
+fn set_in_line_if_any(text: &str, line_start: &str, key: &str, value: &str) -> Result<String> {
+    if text.lines().any(|l| l.starts_with(line_start)) {
+        set_in_line(text, line_start, key, value)
+    } else {
+        Ok(text.to_string())
+    }
+}
+
 /// Sets the version in the manifests and the README, and refreshes `Cargo.lock`.
 fn write(version: &str) -> Result {
     let key = "version = \"";
@@ -69,13 +78,30 @@ fn write(version: &str) -> Result {
         let t = set_in_line(&t, "version = ", key, version)?;
         set_in_line(&t, "astrometry = ", key, version)
     })?;
+    edit("renpet/Cargo.toml", |t| {
+        let t = set_in_line(&t, "version = ", key, version)?;
+        set_in_line(&t, "astrometry = ", key, version)
+    })?;
     edit("README.md", |t| {
         let tag = format!("v{version}");
         let t = set_in_line(&t, "astrometry = { git", "tag = \"", &tag)?;
-        set_in_line(&t, "horae = { git", "tag = \"", &tag)
+        let t = set_in_line(&t, "horae = { git", "tag = \"", &tag)?;
+        set_in_line_if_any(&t, "renpet = { git", "tag = \"", &tag)
+    })?;
+    edit("renpet/README.md", |t| {
+        set_in_line_if_any(&t, "renpet = { git", "tag = \"", &format!("v{version}"))
     })?;
     let status = Command::new("cargo")
-        .args(["update", "-p", "astrometry", "-p", "horae", "--offline"])
+        .args([
+            "update",
+            "-p",
+            "astrometry",
+            "-p",
+            "horae",
+            "-p",
+            "renpet",
+            "--offline",
+        ])
         .current_dir(root())
         .status()
         .map_err(|e| format!("cargo update: {e}"))?;
@@ -180,6 +206,20 @@ mod tests {
         assert_eq!(
             set_in_line(t, "version = ", "version = \"", "2026.46.0").unwrap(),
             "[package]\nversion = \"2026.46.0\"\nserde = { version = \"1\" }\n"
+        );
+    }
+
+    #[test]
+    fn an_optional_line_may_be_absent() {
+        let t = "a = 1\n";
+        assert_eq!(
+            set_in_line_if_any(t, "x = { git", "tag = \"", "v1").unwrap(),
+            t
+        );
+        let t = "x = { git = \"u\", tag = \"v0\" }\n";
+        assert_eq!(
+            set_in_line_if_any(t, "x = { git", "tag = \"", "v1").unwrap(),
+            "x = { git = \"u\", tag = \"v1\" }\n"
         );
     }
 

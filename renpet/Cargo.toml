@@ -1,0 +1,32 @@
+[package]
+name = "renpet"
+description = "The ancient Egyptian civil calendar, hours and decans, carried forward unbroken, on the astrometry ephemeris"
+version = "2026.47.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/storskegg/astrometry"
+readme = "README.md"
+keywords = ["calendar", "egypt", "ephemeris", "astronomy"]
+categories = ["science", "date-and-time"]
+publish = false
+
+[features]
+default = ["embedded", "theories"]
+# astrometry's: the DE440 slice compiled in, or given by `astrometry::slice::install`.
+embedded = ["astrometry/embedded"]
+# astrometry's: VSOP87E and ELP/MPP02 beyond 1800–2200, or errors there.
+theories = ["astrometry/theories"]
+serde = ["dep:serde", "jiff/serde", "astrometry/serde"]
+
+[dependencies]
+astrometry = { path = "..", version = "2026.47.0", default-features = false }
+jiff = "0.2"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+horae = { path = "../horae" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

@@ -25,6 +25,9 @@ signs, the dignities, the Ptolemaic aspects with Lilly's orbs, the Moon's phases
 (void of course), and the planetary days and hours. Both are Apache-2.0: an ephemeris and an
 astrology that are neither copyleft nor costly to license.
 
+Beside horae too, in [`renpet/`](renpet), **renpet**: the ancient Egyptian civil calendar and
+the seasonal hours of the day and night, carried forward unbroken on the same ephemeris.
+
 ## Accuracy
 
 Against the Swiss Ephemeris in its JPL mode (the same DE440), 1800–2200, every body: within

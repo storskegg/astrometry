@@ -6,6 +6,7 @@ use std::process::Command;
 use crate::{Result, root};
 
 const IOS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
+const ANDROID: [&str; 2] = ["aarch64-linux-android", "x86_64-linux-android"];
 
 /// One step of the matrix: its header, and the command line after `cargo`.
 struct Step {
@@ -45,7 +46,13 @@ fn preflight() -> Result {
         return Err("the MSRV toolchain is missing: run `rustup toolchain install 1.99`".into());
     }
     let targets = list(&["target", "list", "--installed"])?;
-    for t in ["wasm32-unknown-unknown", IOS[0], IOS[1]] {
+    for t in [
+        "wasm32-unknown-unknown",
+        IOS[0],
+        IOS[1],
+        ANDROID[0],
+        ANDROID[1],
+    ] {
         if !targets.lines().any(|l| l.trim() == t) {
             return Err(format!(
                 "target {t} is missing: run `rustup target add {t}`"
@@ -132,13 +139,23 @@ fn matrix() -> Result {
             ],
         ),
     ];
-    for t in IOS {
+    for t in IOS.into_iter().chain(ANDROID) {
         for (label, flag) in [
             ("default features", None),
             ("no default features", Some("--no-default-features")),
             ("all features", Some("--all-features")),
         ] {
-            let mut args = vec!["build", "-p", "astrometry", "-p", "horae", "--target", t];
+            let mut args = vec![
+                "build",
+                "-p",
+                "astrometry",
+                "-p",
+                "horae",
+                "-p",
+                "renpet",
+                "--target",
+                t,
+            ];
             args.extend(flag);
             args.push("--locked");
             steps.push(step(&format!("build for {t}, {label}"), &args));

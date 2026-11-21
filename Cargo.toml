@@ -34,7 +34,7 @@ workspace = true
 
 [workspace]
 resolver = "3"
-members = [".", "horae", "xtask"]
+members = [".", "horae", "renpet", "xtask"]
 
 [workspace.lints.rust]
 unsafe_code = "deny"
