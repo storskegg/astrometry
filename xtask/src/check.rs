@@ -1,46 +1,31 @@
-//! `cargo xtask check [--no-jpl]`: the CI matrix (.github/workflows/tests.yml), locally, from
+//! `cargo xtask check`: the CI matrix (.github/workflows/tests.yml), locally, from
 //! a clean and cleaned again at the end.
 
-use std::path::Path;
 use std::process::Command;
 
 use crate::{Result, root};
 
-const DE440_URL: &str = "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp";
 const IOS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
 
 /// One step of the matrix: its header, and the command line after `cargo`.
 struct Step {
     name: String,
     args: Vec<String>,
-    /// Whether it gets `ASTROMETRY_DE440`.
-    jpl: bool,
 }
 
 fn step(name: &str, args: &[&str]) -> Step {
     Step {
         name: name.to_string(),
         args: args.iter().map(|a| a.to_string()).collect(),
-        jpl: false,
     }
 }
 
 pub fn run(args: &[&str]) -> Result {
-    let mut jpl = true;
-    for &a in args {
-        match a {
-            "--no-jpl" => jpl = false,
-            _ => return Err(format!("check: unknown argument {a}")),
-        }
+    if let Some(a) = args.first() {
+        return Err(format!("check: unknown argument {a}"));
     }
     preflight()?;
-    let de440 = root().join("local/jpl/de440.bsp");
-    let result = clean().and_then(|()| {
-        if jpl {
-            ensure_de440(&de440)?;
-        }
-        matrix(jpl.then_some(de440.as_path()))
-    });
+    let result = clean().and_then(|()| matrix());
     // The final clean runs whatever happened.
     let cleaned = clean();
     result.and(cleaned)
@@ -71,39 +56,14 @@ fn preflight() -> Result {
 }
 
 fn clean() -> Result {
-    exec("cargo clean", &["clean"], None)
+    exec("cargo clean", &["clean"])
 }
 
-fn ensure_de440(path: &Path) -> Result {
-    if path.exists() {
-        return Ok(());
-    }
-    println!("==> download de440.bsp");
-    std::fs::create_dir_all(path.parent().expect("a file path"))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    // Downloaded beside it and renamed once complete, so an interrupted download never passes
-    // for the real file.
-    let part = path.with_extension("bsp.part");
-    let status = Command::new("curl")
-        .args(["-sS", "--fail", "-L", "-o"])
-        .arg(&part)
-        .arg(DE440_URL)
-        .status()
-        .map_err(|e| format!("curl: {e}"))?;
-    if status.success() {
-        std::fs::rename(&part, path).map_err(|e| format!("{}: {e}", path.display()))
-    } else {
-        let _ = std::fs::remove_file(&part);
-        Err(format!("download de440.bsp: {DE440_URL}: {status}"))
-    }
-}
-
-fn matrix(de440: Option<&Path>) -> Result {
-    let mut test = step(
+fn matrix() -> Result {
+    let test = step(
         "test (all features)",
         &["test", "--workspace", "--all-features", "--locked"],
     );
-    test.jpl = true;
     let mut steps = vec![
         step("fmt", &["fmt", "--all", "--check"]),
         step(
@@ -186,21 +146,18 @@ fn matrix(de440: Option<&Path>) -> Result {
     }
     for s in steps {
         let args: Vec<&str> = s.args.iter().map(String::as_str).collect();
-        exec(&s.name, &args, if s.jpl { de440 } else { None })?;
+        exec(&s.name, &args)?;
     }
     Ok(())
 }
 
-/// Runs `cargo` with inherited stdio, under a header line; `de440` sets `ASTROMETRY_DE440`,
-/// and without it the variable is cleared.
-fn exec(name: &str, args: &[&str], de440: Option<&Path>) -> Result {
+/// Runs `cargo` with inherited stdio, under a header line, with `ASTROMETRY_DE440` cleared: the
+/// tests that need the full file skip, and the fixture's run.
+fn exec(name: &str, args: &[&str]) -> Result {
     println!("==> {name}: cargo {}", args.join(" "));
     let mut cmd = Command::new("cargo");
     cmd.args(args).current_dir(root());
-    match de440 {
-        Some(p) => cmd.env("ASTROMETRY_DE440", p),
-        None => cmd.env_remove("ASTROMETRY_DE440"),
-    };
+    cmd.env_remove("ASTROMETRY_DE440");
     let status = cmd.status().map_err(|e| format!("{name}: cargo: {e}"))?;
     if status.success() {
         Ok(())

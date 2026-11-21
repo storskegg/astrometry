@@ -3,6 +3,7 @@
 mod check;
 mod de440;
 mod fixtures;
+mod reference;
 mod version;
 
 use std::path::Path;
@@ -13,17 +14,19 @@ const USAGE: &str = "usage: cargo xtask TASK
 tasks:
   fixtures [PART...]
                  fetch the crate's reference data (JPL Horizons, IERS, USNO, IANA, IMCCE,
-                 the Swiss Ephemeris' numbers), or the named parts
-  de440          cut the crate's built-in slice of DE440 from de440.bsp (ASTROMETRY_DE440,
-                 or local/jpl/de440.bsp)
+                 the Swiss Ephemeris' numbers), or the named parts. The part `de440`
+                 downloads de440.bsp (120 MB) to local/jpl/, rebuilds the built-in slice and
+                 writes the reference fixture from it, runs every test against the full
+                 file, and deletes it. The Swiss Ephemeris parts delete target/swisseph when
+                 they're done
+  de440          cut the crate's built-in slice of DE440 from a de440.bsp you have
+                 (ASTROMETRY_DE440, or local/jpl/de440.bsp)
   outer          cut the outer planets' file (Uranus, Neptune, Pluto; feature `outer-planets`)
                  from the same de440.bsp
-  check [--no-jpl]
-                 the CI matrix, locally: fmt, clippy, the tests, wasm32, the MSRV (1.99) and
+  check          the CI matrix, locally: fmt, clippy, the tests, wasm32, the MSRV (1.99) and
                  the iOS builds. Builds go through this task: it runs `cargo clean` before and
-                 after, so every build starts from nothing. It downloads de440.bsp to
-                 local/jpl/ (kept across cleans) unless it's there; --no-jpl skips the
-                 download, and the JPL tests then skip
+                 after, so every build starts from nothing. It downloads nothing: the tests
+                 use the reference fixture, and the ones that need the full de440.bsp skip
   version [DATE] [--write]
                  print the next calendar version YYYY.WW.PATCH for DATE (YYYY-MM-DD, default
                  today in UTC); --write sets it in the manifests, README and Cargo.lock.

@@ -77,22 +77,76 @@ members, as "North Node" and "Under the Beams".
 
 ## The tests and the data
 
-`cargo test` runs the tests against the built-in data and the checked-in reference numbers,
-offline. With a downloaded
-[`de440.bsp`](https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp) (120 MB) at
-`local/jpl/de440.bsp` (git-ignored, and outside `target/` so that a clean keeps it), or named
-by `ASTROMETRY_DE440`, the JPL tests run too, against the full file.
+`cargo test` runs offline, against the built-in data and the checked-in reference numbers,
+among them a small binary fixture made from the full DE440, `tests/data/de440/reference.bin`
+(below). The tests that read the full
+[`de440.bsp`](https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp) (120 MB) from the file
+named by `ASTROMETRY_DE440` are skipped without it. No external ephemeris stays on disk.
 
-- `cargo xtask check [--no-jpl]` runs the whole CI matrix locally: fmt, clippy, the tests,
-  the wasm32 and MSRV (1.99) checks and the iOS builds. Every local build starts from a
-  clean, so it runs `cargo clean` first and again at the end: builds start from nothing each
-  time. It downloads `de440.bsp` to `local/jpl/` if it's missing; `--no-jpl` skips that, and
-  the JPL tests then skip.
-
+- `cargo xtask check` runs the whole CI matrix locally: fmt, clippy, the tests, the wasm32
+  and MSRV (1.99) checks and the iOS builds. Every local build starts from a clean, so it
+  runs `cargo clean` first and again at the end: builds start from nothing each time. It
+  downloads nothing.
 - `cargo xtask fixtures [PART...]` fetches the reference data again: JPL Horizons, the IERS,
-  USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers.
-- `cargo xtask de440` cuts the built-in slice from `de440.bsp`, and `cargo xtask outer` the
-  outer planets' file.
+  USNO, the IANA leap seconds, the theories, and the Swiss Ephemeris' numbers (which are
+  made in a throwaway environment under `target/swisseph`, deleted afterwards).
+- `cargo xtask fixtures de440` downloads `de440.bsp` to `local/jpl/`, rebuilds the two
+  built-in files from it, writes `reference.bin`, runs every test against the full file, and
+  deletes the download, whatever happened. The files it rebuilds must be byte-identical to
+  the committed ones if the download is the one recorded here.
+- `cargo xtask de440` and `cargo xtask outer` cut the built-in slice and the outer planets'
+  file from a `de440.bsp` you already have (`ASTROMETRY_DE440`, or `local/jpl/de440.bsp`).
+
+SHA-256, as recorded in `xtask/src/de440.rs`:
+
+| file | SHA-256 |
+|---|---|
+| `de440.bsp`, as JPL serves it | `a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5` |
+| `data/de440-1800-2200.bin` | `68e5bd49234e959d3be8946cbc9361d4d2e1b85578b2919b16c091384da1c324` |
+| `data/de440-outer-1800-2200.bin` | `29e651b2c6ab2a9c63071532c135a8d0442fdcb4e2b12460c8eab656c254e805` |
+
+### The built-in slice, `ASTRDE02`
+
+The slice is DE440's Chebyshev records for the segments the Sun, Moon and classical planets
+need, 1800-2200, with each coefficient rounded to a fixed step (1 cm for the Moon about the
+Earth-Moon barycentre, 1 m for the rest), written as zigzag varints and deflated in blocks of
+about a year's records. All numbers are little-endian; the file as a whole isn't deflated.
+
+- The file starts with the ASCII magic `ASTRDE02` and the segment count (u32).
+- Then, for each segment, its head followed by its block table. The head is: target and
+  centre NAIF ids (i32 each); the start of the first record and each record's span (f64, TDB
+  seconds past J2000); the number of coefficients per coordinate (u32) and of records (u32);
+  the rounding step (f64, km); the records per block (u32) and the block count (u32). The
+  table has, for each block, its byte offset from the start of the file (u64) and its length
+  in bytes (u32).
+- Then the blocks. Each is raw-deflated (RFC 1951) on its own; inflated, it is the zigzag
+  varints of its records' coefficients (in units of the step, the integer `q` stored as
+  `(q << 1) ^ (q >> 63)`, then 7 bits at a time, low first, the high bit set on all but the
+  last byte), record after record, each record being the x coefficients, then y, then z.
+  A coefficient in km is `q * step`.
+- The Earth about the Earth-Moon barycentre isn't kept: it is the Moon's offset divided by the
+  Earth/Moon mass ratio (81.30056822149722).
+
+With the `outer-planets` feature there is a second file of the same format and span,
+`data/de440-outer-1800-2200.bin`: Uranus, Neptune and Pluto's barycentres (7, 8, 9) about the
+solar-system barycentre, rounded to 1 m.
+
+### The reference fixture, `ASTRREF1`
+
+`tests/data/de440/reference.bin` (about 0.9 MB, uncompressed, little-endian) holds the full
+DE440's numbers at 2,000 instants spread over 1800-2200 (`2378496.5 + 0.37 + i * 146097 /
+2000`), which the tests compare the slice and the analytical theories with.
+
+- The magic `ASTRREF1`, then the instant, segment and body counts (u32 each).
+- The instants: Julian dates (f64), taken as TT for the apparent positions and as TDB for the
+  segments.
+- The geometric section: for each segment of the two built-in files, its target and centre
+  (i32 each), then at each instant the position x, y, z (f64, km) of the target about the
+  centre.
+- The apparent section: for each body, its id (u32: the `Body` enum's order, Sun 0, Moon 1,
+  Mercury 2, Venus 3, Earth 4, Mars 5, Jupiter 6, Saturn 7, Uranus 8, Neptune 9, Pluto 10),
+  then at each instant the apparent ecliptic-of-date longitude and latitude (f64, degrees)
+  from `astrometry::apparent::apparent`.
 
 ## License
 

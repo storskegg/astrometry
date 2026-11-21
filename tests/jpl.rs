@@ -1,8 +1,8 @@
 //! DE440 through the reduction chain, against JPL Horizons and the Swiss
 //! Ephemeris.
 //!
-//! DE440 (120 MB) isn't in the repository: these tests read it from `ASTROMETRY_DE440`, or
-//! `local/jpl/de440.bsp` in the workspace root, and are skipped without it. CI downloads it.
+//! DE440 (120 MB) isn't in the repository: the `de440_*` tests read it from `ASTROMETRY_DE440`
+//! and are skipped without it (`cargo xtask fixtures de440` sets it up, and deletes it again).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -10,18 +10,13 @@ use std::path::PathBuf;
 use astrometry::apparent::apparent;
 use astrometry::source::{Body, Builtin, Jpl, Source};
 
-/// DE440: from `ASTROMETRY_DE440`, which must then exist (CI sets it), or else from
-/// `local/jpl/de440.bsp` if it's there.
+/// DE440, from `ASTROMETRY_DE440` if that's set.
 fn de440() -> Option<Jpl> {
-    if let Some(path) = std::env::var_os("ASTROMETRY_DE440").filter(|p| !p.is_empty()) {
-        return Some(Jpl::open(PathBuf::from(path)).expect("ASTROMETRY_DE440"));
-    }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("local/jpl/de440.bsp");
-    if !path.exists() {
-        eprintln!("skipped: no DE440 at {}", path.display());
+    let Some(path) = std::env::var_os("ASTROMETRY_DE440").filter(|p| !p.is_empty()) else {
+        eprintln!("skipped: ASTROMETRY_DE440 isn't set");
         return None;
-    }
-    Some(Jpl::open(&path).unwrap())
+    };
+    Some(Jpl::open(PathBuf::from(path)).expect("ASTROMETRY_DE440"))
 }
 
 fn rows(file: &str) -> Vec<Vec<String>> {

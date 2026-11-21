@@ -67,7 +67,7 @@ const BODIES: [(&str, &str); 13] = [
 /// A fixture: what makes it.
 type Part = fn() -> Result;
 
-const PARTS: [(&str, Part); 11] = [
+const PARTS: [(&str, Part); 12] = [
     ("deltat", deltat),
     ("usno", usno),
     ("leap-seconds", leap_seconds),
@@ -79,6 +79,7 @@ const PARTS: [(&str, Part); 11] = [
     ("swisseph", swisseph),
     ("houses", houses),
     ("declinations", declinations),
+    ("de440", crate::de440::pipeline),
 ];
 
 /// `cargo xtask fixtures [PART...]`: fetches the named fixtures, or every one.
@@ -129,8 +130,16 @@ fn declinations() -> Result {
 }
 
 /// Runs a Swiss Ephemeris script from `fixtures/` in the virtual environment, writing `out`.
+/// Everything it downloaded or built under `target/swisseph` is deleted afterwards, whatever
+/// happened.
 fn swiss_run(script: &str, out: &str) -> Result {
     let work = root().join("target/swisseph");
+    let result = swiss_work(&work, script, out);
+    let _ = fs::remove_dir_all(&work);
+    result
+}
+
+fn swiss_work(work: &std::path::Path, script: &str, out: &str) -> Result {
     let ephe = work.join("ephe");
     fs::create_dir_all(&ephe).map_err(|e| e.to_string())?;
     let download = |url: &str, to: &std::path::Path| -> Result {

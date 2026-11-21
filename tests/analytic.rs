@@ -4,22 +4,20 @@
 
 use std::path::PathBuf;
 
+mod common;
+
 use astrometry::apparent::apparent;
 use astrometry::source::{Analytic, Body, Builtin, Jpl, Source};
 use astrometry::vector::{norm, sub};
+use common::Reference;
 
-/// DE440: from `ASTROMETRY_DE440`, or else from `local/jpl/de440.bsp` in the workspace root if
-/// it's there.
+/// DE440, from `ASTROMETRY_DE440` if that's set.
 fn de440() -> Option<Jpl> {
-    if let Some(path) = std::env::var_os("ASTROMETRY_DE440").filter(|p| !p.is_empty()) {
-        return Some(Jpl::open(PathBuf::from(path)).expect("ASTROMETRY_DE440"));
-    }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("local/jpl/de440.bsp");
-    if !path.exists() {
-        eprintln!("skipped: no DE440 at {}", path.display());
+    let Some(path) = std::env::var_os("ASTROMETRY_DE440").filter(|p| !p.is_empty()) else {
+        eprintln!("skipped: ASTROMETRY_DE440 isn't set");
         return None;
-    }
-    Some(Jpl::open(&path).unwrap())
+    };
+    Some(Jpl::open(PathBuf::from(path)).expect("ASTROMETRY_DE440"))
 }
 
 const BODIES: [Body; 7] = [
@@ -39,18 +37,17 @@ fn instants() -> impl Iterator<Item = f64> {
 
 #[test]
 fn apparent_against_de440() {
-    let Some(jpl) = de440() else { return };
+    let reference = Reference::load();
     let ana = Analytic;
     for b in BODIES {
         let (mut lon, mut lat) = (0.0f64, 0.0f64);
-        for tt in instants() {
+        for (&tt, j) in reference.instants.iter().zip(reference.apparent(b)) {
             let a = apparent(&ana, b, tt).unwrap();
-            let j = apparent(&jpl, b, tt).unwrap();
-            let dl = ((a.longitude - j.longitude + 540.0).rem_euclid(360.0) - 180.0)
+            let dl = ((a.longitude - j[0] + 540.0).rem_euclid(360.0) - 180.0)
                 * 3600.0
-                * j.latitude.to_radians().cos();
+                * j[1].to_radians().cos();
             lon = lon.max(dl.abs());
-            lat = lat.max(((a.latitude - j.latitude) * 3600.0).abs());
+            lat = lat.max(((a.latitude - j[1]) * 3600.0).abs());
         }
         println!("{b:?}: longitude {lon:.4}″, latitude {lat:.4}″");
         // As measured when E3 began, as a floor: VSOP87 (fitted to DE200) drifts against
@@ -108,18 +105,17 @@ fn raw_vectors_against_de440() {
     }
 }
 
-/// The built-in slice against DE440 itself: the rounding of its coefficients only.
+/// The built-in slice against DE440 itself (the reference fixture): the rounding of its coefficients only.
 #[test]
 fn builtin_against_de440() {
-    let Some(jpl) = de440() else { return };
+    let reference = Reference::load();
     let mut worst = 0.0f64;
-    for tt in instants() {
-        for b in BODIES {
+    for b in BODIES {
+        for (&tt, j) in reference.instants.iter().zip(reference.apparent(b)) {
             let a = apparent(&Builtin, b, tt).unwrap();
-            let j = apparent(&jpl, b, tt).unwrap();
-            let d = ((a.longitude - j.longitude + 540.0).rem_euclid(360.0) - 180.0)
+            let d = ((a.longitude - j[0] + 540.0).rem_euclid(360.0) - 180.0)
                 .abs()
-                .max((a.latitude - j.latitude).abs())
+                .max((a.latitude - j[1]).abs())
                 * 3600.0;
             worst = worst.max(d);
         }
