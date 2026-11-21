@@ -6,7 +6,7 @@ The ancient Egyptian calendar and hours, carried forward unbroken, on the
 Not on crates.io; as a git dependency, at the same tag as astrometry:
 
 ```toml
-renpet = { git = "https://github.com/storskegg/astrometry", tag = "v2026.47.0" }
+renpet = { git = "https://github.com/storskegg/astrometry", tag = "v2026.47.1" }
 ```
 
 ## What it has
